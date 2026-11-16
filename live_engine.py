@@ -306,10 +306,20 @@ class LiveEngine:
                 record['averageFillPrice'] = float(order.get('averageTradedPrice') or record.get('averageFillPrice') or 0)
                 entry_leg = next((leg for leg in order.get('legDetails', []) if leg.get('legName') == 'ENTRY_LEG'), {})
                 entry_stamp = entry_leg.get('exchangeTime') or order.get('exchangeTime')
+                if record['filledQty'] and record['averageFillPrice'] <= 0:
+                    fills = self.broker.entry_fills(record)
+                    if fills:
+                        record['averageFillPrice'] = fills['price']
+                        entry_stamp = fills.get('tradeAt') or entry_stamp
                 if record['filledQty'] and isinstance(entry_stamp, str) and len(entry_stamp) == 19:
                     record['entryTradeAt'] = entry_stamp
-                if not previous_filled <= record['filledQty'] <= record['quantity'] or not math.isfinite(record['averageFillPrice']) or record['filledQty'] and record['averageFillPrice'] <= 0:
-                    record.update(state='ACTION_REQUIRED', message='Broker entry fill quantity or average price is invalid. Check Dhan.')
+                if not previous_filled <= record['filledQty'] <= record['quantity']:
+                    record.update(state='ACTION_REQUIRED', message='Dhan fill quantity conflicts with the app ledger. Check the broker order and trade book.')
+                    with self.lock:
+                        self._write(account, record)
+                    continue
+                if not math.isfinite(record['averageFillPrice']) or record['filledQty'] and record['averageFillPrice'] <= 0:
+                    record.update(state='ACTION_REQUIRED', message='Dhan confirmed an entry fill but no matching valid average price was found in the trade book. Check the Dhan order and trade book.')
                     with self.lock:
                         self._write(account, record)
                     continue

@@ -104,6 +104,30 @@ class DhanLiveBroker:
     def orders(self):
         return self.call('/super/orders')
 
+    def entry_fills(self, record):
+        """Return a verified weighted BUY fill from Dhan's trade book for one order."""
+        rows = self.call('/trades')
+        if not isinstance(rows, list):
+            raise ValueError('Cannot verify entry executions in Dhan trade book.')
+        matches = [row for row in rows if str(row.get('orderId')) == str(record['orderId']) and
+                   str(row.get('dhanClientId')) == record['account'] and str(row.get('securityId')) == record['securityId'] and
+                   row.get('transactionType') == 'BUY' and row.get('productType') == 'CNC' and row.get('exchangeSegment') == 'NSE_EQ']
+        seen, quantity, value, times = set(), 0, 0.0, []
+        for row in matches:
+            trade_id = row.get('exchangeTradeId')
+            qty, price = row.get('tradedQuantity'), row.get('tradedPrice')
+            if (not trade_id or trade_id in seen or not isinstance(qty, int) or isinstance(qty, bool) or qty <= 0
+                    or not isinstance(price, (int, float)) or isinstance(price, bool) or not math.isfinite(price) or price <= 0):
+                raise ValueError('Dhan trade book returned invalid or duplicate entry fills. Review in Dhan.')
+            seen.add(trade_id)
+            stamp = row.get('exchangeTime') or row.get('updateTime') or row.get('createTime')
+            if isinstance(stamp, str) and len(stamp) == 19:
+                times.append(stamp)
+            quantity, value = quantity+qty, value+qty*price
+        if quantity != record['filledQty'] or quantity > record['quantity']:
+            return None
+        return {'quantity': quantity, 'price': value/quantity, 'tradeAt': min(times) if times else None}
+
     def submit(self, record):
         account = self.ready()
         if account != record['account']:
