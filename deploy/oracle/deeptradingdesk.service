@@ -1,0 +1,23 @@
+[Unit]
+Description=Deep Trading Desk backend
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=deepdesk
+Group=deepdesk
+WorkingDirectory=/opt/deeptradingdesk
+EnvironmentFile=/etc/deeptradingdesk.env
+ExecStart=/opt/deeptradingdesk/venv/bin/python /opt/deeptradingdesk/server.py --host 127.0.0.1 --port 8080
+Restart=on-failure
+RestartSec=3
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/deeptradingdesk/runtime
+
+[Install]
+WantedBy=multi-user.target

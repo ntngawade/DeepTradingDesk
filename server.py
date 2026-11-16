@@ -2,6 +2,8 @@
 import csv
 import io
 import json
+import hmac
+import os
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import xml.etree.ElementTree as ET
@@ -252,7 +254,7 @@ class DhanSession:
             except Exception:
                 raise ConnectionError('Cannot load the Dhan instrument list. Check internet access and retry.') from None
             key = tuple(symbols)
-            if self.quote_cache is not None and self.quote_key == key and time.monotonic() - self.quote_time < 2:
+            if self.quote_cache is not None and self.quote_key == key and time.monotonic() - self.quote_time < 0.9:
                 return self.quote_cache
             # Dhan market-quote APIs allow one request per second, including other app callers.
             elapsed = time.monotonic() - self.quote_time
@@ -425,10 +427,16 @@ class Handler(SimpleHTTPRequestHandler):
     def local_request(self):
         host = self.headers.get('Host', '')
         allowed = {f'127.0.0.1:{self.server.server_port}', f'localhost:{self.server.server_port}'}
-        if host not in allowed:
-            return False
         origin = self.headers.get('Origin')
-        return not origin or origin == 'http://' + host
+        remote = self.client_address[0]
+        if host in allowed and remote in ('127.0.0.1', '::1'):
+            return not origin or origin == 'http://' + host
+        public_hosts = {item.strip().lower() for item in os.environ.get('DESK_ALLOWED_HOSTS', '').split(',') if item.strip()}
+        proxy_token = os.environ.get('DESK_PROXY_TOKEN', '')
+        if (not proxy_token or host.lower() not in public_hosts or remote not in ('127.0.0.1', '::1')
+                or not hmac.compare_digest(self.headers.get('X-Desk-Proxy-Token', ''), proxy_token)):
+            return False
+        return not origin or origin == 'https://' + host.lower()
 
     def json_response(self, data, status=200):
         payload = json.dumps(data).encode()
@@ -633,14 +641,15 @@ class Handler(SimpleHTTPRequestHandler):
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Deep Trading Desk local application backend')
+    parser = argparse.ArgumentParser(description='Deep Trading Desk application backend')
     parser.add_argument('--port', type=int, default=8080)
+    parser.add_argument('--host', default=os.environ.get('DESK_BIND_HOST', '127.0.0.1'))
     args = parser.parse_args()
     try:
-        http = ThreadingHTTPServer(('127.0.0.1', args.port), Handler)
+        http = ThreadingHTTPServer((args.host, args.port), Handler)
     except OSError:
         parser.exit(1, f'Port {args.port} is unavailable. Use --port 8081 or stop the old server.\n')
-    print(f'Deep Trading Desk (Dhan backend enabled): http://127.0.0.1:{http.server_port}', flush=True)
+    print(f'Deep Trading Desk (Dhan backend enabled): http://{args.host}:{http.server_port}', flush=True)
     LIVE = LiveEngine(ROOT / 'runtime' / 'live.sqlite', DhanLiveBroker(DHAN, INSTRUMENTS, lambda: build_opener(NoRedirect)))
     LIVE.start()
     threading.Thread(target=DHAN.restore, daemon=True, name='restore-dhan-connection').start()

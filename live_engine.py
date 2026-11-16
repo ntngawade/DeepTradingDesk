@@ -4,6 +4,7 @@ import json
 import math
 import sqlite3
 import threading
+import time
 import uuid
 from datetime import datetime, timezone, timedelta, date
 from decimal import Decimal, ROUND_DOWN, ROUND_UP
@@ -35,7 +36,7 @@ def nonnegative(value, name):
 
 
 def entry_touched(record, price, fetched_at):
-    """Touch or crossing from either side; proximity alone never triggers entry."""
+    """Legacy point-touch helper; live entries now use the configured proximity band."""
     current, entry = Decimal(str(price)), Decimal(str(record['entry']))
     if current == entry:
         return True
@@ -61,7 +62,6 @@ def normalize_plan(plan, settings, instrument, trigger=1):
         raise ValueError('A stable trade ID is required.')
     capital = positive(settings.get('capital'), 'capital')
     risk_percent = positive(settings.get('risk'), 'risk percentage', 100)
-    risk_limit = capital * positive(settings.get('portfolioRisk'), 'portfolio risk limit', 100) / 100
     trigger = positive(trigger, 'entry proximity percentage', 7)
     tick = Decimal(str(positive(instrument.get('tickSize'), 'exchange tick size')))
     def price(key, rounding):
@@ -87,10 +87,9 @@ def normalize_plan(plan, settings, instrument, trigger=1):
             'notes': str(plan.get('notes') or '')[:200],
             'entry': entry, 'sl': sl, 'target': target, 'quantity': quantity,
             'cash': round(entry * quantity, 2), 'risk': round(float(per_share * quantity), 2),
-            'capital': capital, 'riskLimit': risk_limit, 'triggerPercent': trigger,
+            'capital': capital, 'triggerPercent': trigger,
             'externalCash': nonnegative(settings.get('externalCash', 0), 'recorded holding capital'),
-            'externalRisk': nonnegative(settings.get('externalRisk', 0), 'recorded holding risk'),
-            'expiry': expiry, 'tickSize': float(tick), 'product': 'CNC', 'orderType': 'LIMIT', 'entryRule': 'TOUCH_OR_CROSS'}
+            'expiry': expiry, 'tickSize': float(tick), 'product': 'CNC', 'orderType': 'LIMIT', 'entryRule': 'WITHIN_TRIGGER_BAND'}
 
 
 class LiveEngine:
@@ -182,19 +181,15 @@ class LiveEngine:
                     'account': account, 'records': self.records(account) if account else [],
                     'error': self.error, 'marketSession': self.is_open(), 'triggerPercent': 1,
                     'unverifiedActiveCount': unverified,
-                    'engine': 'CNC_SUPER_ORDER', 'entryRule': 'TOUCH_OR_CROSS', 'serverRequiredForNewEntries': True}
+                    'engine': 'CNC_SUPER_ORDER', 'entryRule': 'WITHIN_TRIGGER_BAND', 'serverRequiredForNewEntries': True}
 
     def _check_capacity(self, snapshot, records, funds):
         active = [r for r in records if r['state'] in ACTIVE and r['tradeId'] != snapshot['tradeId']]
         if any(r['symbol'] == snapshot['symbol'] for r in active):
             raise ValueError('Another active live plan already exists for this stock.')
         external_cash = max([snapshot.get('externalCash', 0)] + [r.get('externalCash', 0) for r in active])
-        external_risk = max([snapshot.get('externalRisk', 0)] + [r.get('externalRisk', 0) for r in active])
         if external_cash + sum(r['cash'] for r in active) + snapshot['cash'] > snapshot['capital'] + 0.001:
             raise ValueError('Live capital reservation limit exceeded.')
-        limit = min([snapshot['riskLimit']] + [r['riskLimit'] for r in active])
-        if external_risk + sum(r['risk'] for r in active) + snapshot['risk'] > limit + 0.001:
-            raise ValueError(f'Total live risk reservation limit exceeded: INR {external_risk + sum(r["risk"] for r in active) + snapshot["risk"]:.2f} including recorded holdings; limit INR {limit:.2f}.')
         unsent = sum(r['cash'] for r in active if r['state'] == 'ARMED')
         if unsent + snapshot['cash'] > funds + 0.001:
             raise ValueError('Insufficient available Dhan funds after armed-plan reservations.')
@@ -242,7 +237,7 @@ class LiveEngine:
                     raise ValueError('Duplicate live arming is blocked.')
                 self._check_capacity(snapshot, self.records(account), snapshot['availableFunds'])
                 record = {k: v for k, v in snapshot.items() if k not in ('previewId', 'availableFunds')}
-                record.update(state='ARMED', orderId=None, filledQty=0, correlationId='NTD'+hashlib.sha256((account+'|'+snapshot['tradeId']).encode()).hexdigest()[:26], message='Waiting for CMP to touch or cross planned entry; proximity alone does not buy.')
+                record.update(state='ARMED', orderId=None, filledQty=0, correlationId='NTD'+hashlib.sha256((account+'|'+snapshot['tradeId']).encode()).hexdigest()[:26], message=f'Waiting for CMP within {snapshot["triggerPercent"]:g}% of planned entry; submitted order uses the planned entry limit.')
                 self._write(account, record)
                 del self.previews[preview_id]
                 return dict(record)
@@ -309,6 +304,10 @@ class LiveEngine:
                 previous_filled = record.get('filledQty', 0)
                 record['filledQty'] = previous_filled if order.get('filledQty') is None else int(order['filledQty'])
                 record['averageFillPrice'] = float(order.get('averageTradedPrice') or record.get('averageFillPrice') or 0)
+                entry_leg = next((leg for leg in order.get('legDetails', []) if leg.get('legName') == 'ENTRY_LEG'), {})
+                entry_stamp = entry_leg.get('exchangeTime') or order.get('exchangeTime')
+                if record['filledQty'] and isinstance(entry_stamp, str) and len(entry_stamp) == 19:
+                    record['entryTradeAt'] = entry_stamp
                 if not previous_filled <= record['filledQty'] <= record['quantity'] or not math.isfinite(record['averageFillPrice']) or record['filledQty'] and record['averageFillPrice'] <= 0:
                     record.update(state='ACTION_REQUIRED', message='Broker entry fill quantity or average price is invalid. Check Dhan.')
                     with self.lock:
@@ -381,7 +380,6 @@ class LiveEngine:
                 age = (datetime.now(timezone.utc) - datetime.fromisoformat(quote['fetchedAt'])).total_seconds()
                 if not 0 <= age <= 15:
                     raise ValueError('Dhan quote is stale. New entries paused.')
-                touched = entry_touched(record, price, quote['fetchedAt'])
                 near = abs(price-record['entry'])/record['entry']*100 <= record['triggerPercent']+1e-9
                 with self.lock:
                     self.db.execute('BEGIN IMMEDIATE')
@@ -389,10 +387,10 @@ class LiveEngine:
                     if not current or current['state'] != 'ARMED' or current['reviewedAt'] != record['reviewedAt']:
                         self.db.rollback()
                         continue
-                    current.update(lastCmp=price, lastCmpAt=quote['fetchedAt'], message='Entry touch/cross observed; checking execution readiness.' if touched else 'Within 1% preparation zone; waiting for planned entry.' if near else 'Waiting for planned entry.')
+                    current.update(lastCmp=price, lastCmpAt=quote['fetchedAt'], message=f'Within {record["triggerPercent"]:g}% trigger zone; checking order readiness.' if near else 'Waiting for CMP to enter the trigger zone.')
                     self._write(account, current)
                     record = current
-                if not touched or not near:
+                if not near:
                     continue
                 if price <= record['sl'] or price >= record['target']:
                     raise ValueError('CMP has crossed the planned stop-loss or target. Review the plan.')
@@ -433,7 +431,9 @@ class LiveEngine:
 
     def start(self):
         def work():
-            while not self.stop.wait(5):
+            while not self.stop.is_set():
+                started = time.monotonic()
                 self.cycle()
+                self.stop.wait(max(0, 1.05 - (time.monotonic() - started)))
         self.thread = threading.Thread(target=work, daemon=True, name='CNC-live-engine')
         self.thread.start()

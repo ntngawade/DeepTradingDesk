@@ -20,7 +20,7 @@
  async function activatePlans(plans){
   if(queueing)return {error:'Live prechecks are already running.'};
   if(!lastDisplay?.enabled)return {waiting:true};
-  queueing=true;lastError=null;$('liveEnable').disabled=true;$('liveState').textContent='Prechecking enabled plans against Dhan, funds, holdings and the total risk limit...';
+  queueing=true;lastError=null;$('liveEnable').disabled=true;$('liveState').textContent='Prechecking enabled plans against Dhan, funds, available capital, holdings and per-trade sizing...';
   let queued=0;const errors=[];const records=lastDisplay.records||[];
   try{
    for(const plan of plans){

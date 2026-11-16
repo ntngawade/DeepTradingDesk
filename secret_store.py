@@ -2,6 +2,7 @@
 import ctypes
 import json
 import os
+import base64
 from pathlib import Path
 
 
@@ -29,12 +30,35 @@ def windows_crypt(data, decrypt=False):
         kernel.LocalFree(outgoing.data)
 
 
+def cloud_crypt(data, decrypt=False):
+    """AES-GCM credential encryption for a Linux cloud host, keyed outside the repo."""
+    encoded_key = os.environ.get('DESK_CREDENTIAL_KEY', '')
+    try:
+        key = base64.b64decode(encoded_key, altchars=b'-_', validate=True)
+    except (ValueError, TypeError):
+        key = b''
+    if len(key) != 32:
+        raise ValueError('Cloud credential storage needs a base64 32-byte DESK_CREDENTIAL_KEY.')
+    try:
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    except ImportError:
+        raise ValueError('Install the cryptography package to use encrypted cloud credential storage.') from None
+    cipher = AESGCM(key)
+    if decrypt:
+        if not data.startswith(b'DTD1') or len(data) < 32:
+            raise ValueError('Saved cloud credentials are invalid. Reconnect with a fresh Dhan token.')
+        return cipher.decrypt(data[4:16], data[16:], None)
+    nonce = os.urandom(12)
+    return b'DTD1' + nonce + cipher.encrypt(nonce, data, None)
+
+
 class SecretStore:
     def __init__(self, path):
         self.path = Path(path)
 
     def save(self, client_id, token):
-        encrypted = windows_crypt(json.dumps({'clientId': client_id, 'token': token}).encode())
+        payload = json.dumps({'clientId': client_id, 'token': token}).encode()
+        encrypted = windows_crypt(payload) if os.name == 'nt' else cloud_crypt(payload)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         temporary = self.path.with_suffix('.tmp')
         try:
@@ -46,7 +70,11 @@ class SecretStore:
     def load(self):
         if not self.path.exists():
             return None
-        data = json.loads(windows_crypt(self.path.read_bytes(), decrypt=True))
+        encoded = self.path.read_bytes()
+        if os.name == 'nt':
+            data = json.loads(windows_crypt(encoded, decrypt=True))
+        else:
+            data = json.loads(cloud_crypt(encoded, decrypt=True))
         if not isinstance(data, dict) or not isinstance(data.get('clientId'), str) or not isinstance(data.get('token'), str):
             raise ValueError('Saved credentials are invalid. Reconnect with a fresh Dhan token.')
         return data

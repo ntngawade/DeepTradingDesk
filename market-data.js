@@ -24,7 +24,7 @@
    const missing=[...all.unresolved,...all.missing];
    const diagnostics=all.quoteDiagnostics||{},emptyFeed=Object.keys(all.quotes).length===0&&diagnostics.requestedInstrumentCount>0&&diagnostics.returnedInstrumentCount===0;
    const detail=emptyFeed?` Dhan returned zero quote records for ${diagnostics.requestedInstrumentCount} requested instruments (API status: ${diagnostics.apiStatus}; segments returned: ${diagnostics.returnedSegmentNames?.join(', ')||'none'}). Check that the Data API subscription is active for this account/token, then retry; this response does not identify a stock-symbol problem.`:missing.length?' No price returned for: '+missing.join(', ')+'.':'';
-   message(`${Object.keys(all.quotes).length}/${symbols.length} Dhan prices / retrieved ${new Date(all.fetchedAt).toLocaleTimeString('en-IN',{timeZone:'Asia/Kolkata'})} IST / refresh every 30s.${detail} LTP may be the last traded price outside market hours.`);
+   message(`${Object.keys(all.quotes).length}/${symbols.length} Dhan prices / retrieved ${new Date(all.fetchedAt).toLocaleTimeString('en-IN',{timeZone:'Asia/Kolkata'})} IST / refresh every 30 seconds.${detail} New ticks depend on Dhan data; LTP may be the last traded price outside market hours.`);
   }catch(error){if(requestGeneration===generation){const text=error.name==='TimeoutError'?'Dhan CMP request timed out. Retry Refresh Dhan CMP.':error.message;TradeDeskData.clearQuotes(text);message(text);feed('FEED UNAVAILABLE');}}
   finally{busy=false;$('refreshPrices').disabled=false;}
  }

@@ -7,7 +7,7 @@ from pathlib import Path
 from live_engine import LiveEngine, normalize_plan, entry_touched
 
 
-SETTINGS = {'capital': 500000, 'risk': 1, 'portfolioRisk': 5}
+SETTINGS = {'capital': 500000, 'risk': 1}
 PLAN = {'id': 'PLAN-1', 'symbol': 'JIOFIN', 'entry': 1000, 'sl': 980, 'target': 1040, 'status': 'Watching'}
 
 
@@ -253,11 +253,11 @@ class LiveEngineTests(unittest.TestCase):
         self.engine.cycle()
         self.assertFalse(self.broker.sent)
 
-    def test_total_portfolio_risk_and_existing_exposure(self):
-        settings = {**SETTINGS, 'portfolioRisk': 1.5}
-        self.arm(settings=settings)
-        with self.assertRaisesRegex(ValueError, 'risk reservation'):
-            self.engine.preview({**PLAN, 'id': 'PLAN-2', 'symbol': 'TCS'}, settings)
+    def test_per_trade_risk_without_aggregate_portfolio_cap(self):
+        self.arm(settings=SETTINGS)
+        settings = {**SETTINGS, 'portfolioRisk': 0.01}
+        review = self.engine.preview({**PLAN, 'id': 'PLAN-2', 'symbol': 'TCS'}, settings)
+        self.assertEqual(review['risk'], 5000)
         self.broker.exposure = True
         self.engine.cycle()
         self.assertFalse(self.broker.sent)
@@ -301,10 +301,14 @@ class LiveEngineTests(unittest.TestCase):
             self.engine.arm(review['previewId'])
         self.assertFalse(self.broker.sent)
 
-    def test_recorded_holdings_risk_is_included(self):
-        with self.assertRaisesRegex(ValueError, 'risk reservation'):
-            self.engine.preview(PLAN, {**SETTINGS, 'externalCash': 150000, 'externalRisk': 22000})
+    def test_recorded_holding_risk_does_not_create_an_aggregate_cap(self):
+        review = self.engine.preview(PLAN, {**SETTINGS, 'externalRisk': 220000})
+        self.assertEqual(review['risk'], 5000)
         self.assertFalse(self.broker.sent)
+
+    def test_recorded_holding_cash_remains_reserved(self):
+        with self.assertRaisesRegex(ValueError, 'capital reservation'):
+            self.engine.preview(PLAN, {**SETTINGS, 'externalCash': 300000})
 
     def test_pause_cancels_in_progress_enable(self):
         started, proceed = threading.Event(), threading.Event()

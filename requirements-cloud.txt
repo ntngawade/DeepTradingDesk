@@ -1,0 +1,2 @@
+# Required only for encrypted Dhan token storage on a Linux cloud host.
+cryptography>=43,<47
