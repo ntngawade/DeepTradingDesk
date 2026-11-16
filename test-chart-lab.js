@@ -1,0 +1,35 @@
+"use strict";
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+async function test(){
+ const elements=new Map(),calls=[],plans=[],events={};let count=0,pending=null,available=true;const timers=[];
+ const el=id=>{if(!elements.has(id))elements.set(id,{value:'',checked:false,disabled:false,innerHTML:'',textContent:'',files:[],classList:{toggle(){},contains(){return false;}},addEventListener(type,fn){this[type]=fn;},removeAttribute(){}});return elements.get(id);};
+ const response=data=>({ok:true,headers:{get:()=> 'application/json'},json:async()=>data});
+ const analysis=first=>({symbol:first?'CYIENT':'BDL',setup:first?'MIT':'QIT',higherTimeframe:first?'Monthly':'Quarterly',timeframe:first?'D':'W',timeframeLabel:first?'Daily':'Weekly',entry:first?914.2:1004,sl:first?879.1:878,target:first?null:1256,targetSource:first?'missing':'marked on chart',canCalculateTarget:first,notes:[first?'This is followup zone':'Fresh zone'],warnings:first?['No target marked']:[],evidence:{setup:first?'RB3-M':'RB1-Q'},markers:{entry:{y:.62},sl:{y:.67}},rawText:'Chart label evidence'});
+ const context={setInterval(fn,ms){timers.push({fn,ms});},Intl,Date,Number,String,Object,Array,Math,Promise,Error,AbortSignal,TradeMath:require('./trade-math'),TradeDeskData:{settings:()=>({capital:500000,risk:1,rr:2}),addChartPlan:p=>{plans.push(p);return 'P'+plans.length;}},document:{getElementById:el,addEventListener(type,fn){events[type]=fn;}},URL:{createObjectURL:()=> 'blob:local-chart',revokeObjectURL(){}},FileReader:class{readAsDataURL(){this.result='data:image/png;base64,iVBORw0KGgo=';this.onload();}},
+  fetch:async(path,options)=>{calls.push({path,options});if(path.split('?')[0].endsWith('/status'))return response(available?{connected:true,independent:true,message:'Built-in reader ready.'}:{connected:false,models:[]});count++;return pending||response({analysis:analysis(count===1),localOnly:true});}};
+ vm.createContext(context);vm.runInContext(fs.readFileSync(__dirname+'/chart-lab.js','utf8'),context);await new Promise(setImmediate);
+ assert(calls.every(c=>c.path.split('?')[0].endsWith('/status')),'Opening the tab never reads charts or saves plans');
+ const image=name=>({name,type:'image/png',size:100});let prevented=false;
+ await events.paste({preventDefault(){prevented=true;},clipboardData:{items:['first','second'].map(name=>({kind:'file',type:'image/png',getAsFile:()=>image(name)}))}});
+ assert(prevented);assert.equal(count,2);assert.equal(el('aiQueueCount').textContent,'2');assert(el('aiReview').innerHTML.includes('This is followup zone'));assert(el('aiReview').innerHTML.includes('MIT'));assert(el('aiOverlay').innerHTML.includes('ENTRY 914.20'));assert.equal(plans.length,0);
+ const click=async(action,id)=>events.click({target:{closest:()=>({dataset:{aiAction:action,aiId:id}})}});
+ const check=id=>events.change({target:{dataset:{aiAction:'check',aiId:id},checked:true}});
+ await click('add','1');assert.equal(plans.length,0,'Unchecked and target-missing charts cannot be added');
+ await click('defaultTarget','1');assert(el('aiReview').innerHTML.includes('984.40'));check('1');await click('add','1');
+ assert.equal(plans.length,1);assert.equal(plans[0].symbol,'CYIENT');assert.equal(plans[0].setup,'MIT');assert.equal(plans[0].timeframe,'D');assert.equal(plans[0].target,984.4);assert(plans[0].notes.startsWith('This is followup zone'));assert(plans[0].notes.includes('no target was marked'));
+ await click('add','1');assert.equal(plans.length,1,'Saved charts are not added twice');
+ await click('select','2');assert(el('aiReview').innerHTML.includes('Chart analysis and interpretation'));assert(el('aiReview').innerHTML.includes('Originally read'));check('2');await click('edit','2');assert(el('aiAddAll').disabled,'Editing revokes the previous review acknowledgement');
+ events.input({target:{id:'aiEditNotes',value:'Draft kept between charts'}});await click('select','1');await click('select','2');assert(el('aiReview').innerHTML.includes('Draft kept between charts'),'Unsaved corrections must survive switching between chart reviews');
+ for(const [id,value] of Object.entries({aiEditSymbol:'BDL',aiEditSetup:'QIT',aiEditTimeframe:'W',aiEditEntry:'1005',aiEditSL:'1006',aiEditTarget:'1260',aiEditNotes:'Updated zone note'}))el(id).value=value;
+ const submit=()=>events.submit({preventDefault(){},target:{id:'aiCorrectionForm',dataset:{aiId:'2'}}});
+ submit();assert(el('aiCorrectionError').textContent.includes('stop-loss must be below entry'));await click('add','2');assert.equal(plans.length,1,'Invalid or unconfirmed edits cannot be saved as a trade');
+ el('aiEditSL').value='880';submit();assert(el('aiReview').innerHTML.includes('Your correction'));assert(el('aiReview').innerHTML.includes('1,004.00'),'Original reading stays visible');assert(el('aiReview').innerHTML.includes('1,005.00'),'Corrected reading is shown separately');
+ await click('add','2');assert.equal(plans.length,1,'Saved corrections require a new acknowledgement');check('2');el('aiAddAll').onclick();assert.equal(plans.length,2);assert.equal(plans[1].entry,1005);assert.equal(plans[1].sl,880);assert.equal(plans[1].target,1260);assert(plans[1].notes.startsWith('Updated zone note'));
+ let finish;pending=new Promise(resolve=>{finish=resolve;});el('aiImage').files=[image('third'),image('fourth')];const loading=el('aiImage').onchange();await new Promise(setImmediate);assert.equal(el('aiQueueCount').textContent,'4');el('aiClear').onclick();finish(response({analysis:analysis(false)}));await loading;
+ assert.equal(el('aiQueueCount').textContent,'0','Cleared charts cannot return after an in-flight read');assert.equal(plans.length,2);
+ pending=null;available=false;await el('aiCheck').onclick();el('aiImage').files=[image('backend-recovery')];await el('aiImage').onchange();assert(el('aiSelectedLabel').textContent.includes('Reader unavailable'),'A blocked chart must not be labelled Queued indefinitely');assert(el('aiReview').innerHTML.includes('older chart-reader API'));
+ available=true;const retryTimer=timers.find(t=>t.ms===15000);assert(retryTimer);retryTimer.fn();for(let i=0;i<5;i++)await new Promise(setImmediate);assert(el('aiReview').innerHTML.includes('Chart analysis and interpretation'),'A waiting chart must automatically resume when the backend becomes available');assert.equal(plans.length,2,'Recovery never automatically adds or executes a plan');
+ assert(calls.every(c=>c.path.startsWith('/api/chart-ai/')),'No cloud, model-service or execution requests');
+ console.log('Passed: multi-image paste/upload queue, automatic marked-level reading, separate setup/timeframe, notes saved, explicit missing-target fallback, review gating, duplicate-click guard and clearing in-flight results.');
+}
+test().catch(error=>{console.error(error);process.exitCode=1;});

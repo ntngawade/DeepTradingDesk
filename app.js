@@ -1,0 +1,524 @@
+'use strict';
+const $ = id => document.getElementById(id);
+const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const money = n => new Intl.NumberFormat('en-IN', {style:'currency',currency:'INR',maximumFractionDigits:2}).format(n);
+const uid = () => crypto.randomUUID();
+// User's suggestion universe; symbols outside this list remain valid plan inputs.
+const stockSymbols = `360ONE 3MINDIA AADHARHFC AARTIIND AAVAS ABB ABBOTINDIA ABCAPITAL ABDL ABFRL ABLBL ABREL ABSLAMC ACC ACE ACMESOLAR ACUTAAS ADANIENSOL ADANIENT ADANIGREEN ADANIPORTS ADANIPOWER AEGISLOG AEGISVOPAK AFCONS AFFLE AIAENG AIIL AJANTPHARM ALKEM AMBER AMBUJACEM ANANDRATHI ANANTRAJ ANGELONE ANTHEM ANURAS APARINDS APLAPOLLO APOLLOHOSP APOLLOTYRE APTUS ARE&M ASAHIINDIA ASHOKLEY ASIANPAINT ASTERDM ASTRAL ATGL ATHERENERG ATUL AUBANK AUROPHARMA AWL AXISBANK
+BAJAJ-AUTO BAJAJFINSV BAJAJHFL BAJAJHLDNG BAJFINANCE BALKRISIND BALRAMCHIN BANDHANBNK BANKBARODA BANKINDIA BATAINDIA BAYERCROP BBTC BDL BEL BELRISE BEML BERGEPAINT BHARATFORG BHARTIARTL BHARTIHEXA BHEL BIKAJI BIOCON BLS BLUEDART BLUEJET BLUESTARCO BOSCHLTD BPCL BRIGADE BRITANNIA BSE BSOFT
+CAMS CANBK CANFINHOME CANHLIFE CAPLIPOINT CARBORUNIV CARTRADE CASTROLIND CCL CDSL CEATLTD CEMPRO CENTRALBK CESC CGCL CGPOWER CHALET CHAMBLFERT CHENNPETRO CHOICEIN CHOLAFIN CHOLAHLDNG CIEINDIA CIPLA CLEAN COALINDIA COCHINSHIP COFORGE COHANCE COLPAL CONCOR CONCORDBIO COROMANDEL CPPLUS CRAFTSMAN CREDITACC CRISIL CROMPTON CUB CUMMINSIND CYIENT
+DABUR DALBHARAT DATAPATTNS DCMSHRIRAM DEEPAKFERT DEEPAKNTR DELHIVERY DEVYANI DIVISLAB DIXON DLF DMART DOMS DRREDDY
+ECLERX EICHERMOT EIDPARRY EIHOTEL ELECON ELGIEQUIP EMAMILTD EMCURE EMMVEE ENDURANCE ENGINERSIN ENRIN ERIS ESCORTS ETERNAL EXIDEIND
+FACT FEDERALBNK FINCABLES FIRSTCRY FIVESTAR FLUOROCHEM FORCEMOT FORTIS FSL
+GABRIEL GAIL GALLANTT GESHIP GICRE GILLETTE GLAND GLAXO GLENMARK GMDCLTD GMRAIRPORT GODFRYPHLP GODIGIT GODREJCP GODREJIND GODREJPROP GPIL GRANULES GRAPHITE GRASIM GRAVITA GROWW GRSE GVT&D
+HAL HAVELLS HBLENGINE HCLTECH HDBFS HDFCAMC HDFCBANK HDFCLIFE HEG HEROMOTOCO HEXT HFCL HINDALCO HINDCOPPER HINDPETRO HINDUNILVR HINDZINC HOMEFIRST HONASA HONAUT HSCL HUDCO HYUNDAI
+ICICIAMC ICICIBANK ICICIGI ICICIPRULI IDBI IDEA IDFCFIRSTB IEX IFCI IGIL IGL IIFL IKS INDGN INDHOTEL INDIACEM INDIAMART INDIANB INDIGO INDUSINDBK INDUSTOWER INFY INOXWIND INTELLECT IOB IOC IPCALAB IRB IRCON IRCTC IREDA IRFC ITC ITCHOTELS ITI
+J&KBANK JAINREC JBMA JINDALSAW JINDALSTEL JIOFIN JKCEMENT JKTYRE JMFINANCIL JPPOWER JSL JSWCEMENT JSWDULUX JSWENERGY JSWINFRA JSWSTEEL JUBLFOOD JUBLINGREA JUBLPHARMA JWL JYOTICNC
+KAJARIACER KALYANKJIL KARURVYSYA KAYNES KEC KEI KFINTECH KIMS KIRLOSENG KOTAKBANK KPIL KPITTECH KPRMILL
+LALPATHLAB LATENTVIEW LAURUSLABS LEMONTREE LENSKART LGEINDIA LICHSGFIN LICI LINDEINDIA LLOYDSME LODHA LT LTF LTFOODS LTM LTTS LUPIN
+M&M M&MFIN MAHABANK MANAPPURAM MANKIND MAPMYINDIA MARICO MARUTI MAXHEALTH MAZDOCK MCX MEDANTA MEESHO MFSL MGL MINDACORP MMTC MOTHERSON MOTILALOFS MPHASIS MRF MRPL MSUMI MUTHOOTFIN
+NAM-INDIA NATCOPHARM NATIONALUM NAUKRI NAVA NAVINFLUOR NBCC NCC NESTLEIND NETWEB NEULANDLAB NEWGEN NH NHPC NIACL NIVABUPA NLCINDIA NMDC NSLNISP NTPC NTPCGREEN NUVAMA NUVOCO NYKAA
+OBEROIRLTY OFSS OIL OLAELEC OLECTRA ONESOURCE ONGC
+PAGEIND PARADEEP PATANJALI PAYTM PCBL PERSISTENT PETRONET PFC PFIZER PFOCUS PGEL PHOENIXLTD PIDILITIND PIIND PINELABS PIRAMALFIN PNB PNBHOUSING POLICYBZR POLYCAB POLYMED POONAWALLA POWERGRID POWERINDIA PPLPHARMA PREMIERENE PRESTIGE PTCIL PVRINOX PWL
+RADICO RAILTEL RAINBOW RAMCOCEM RBLBANK RECLTD REDINGTON RELIANCE RHIM RITES RKFORGE RPOWER RRKABEL RVNL
+SAGILITY SAIL SAILIFE SAMMAANCAP SAPPHIRE SARDAEN SAREGAMA SBFC SBICARD SBILIFE SBIN SCHAEFFLER SCHNEIDER SCI SHREECEM SHRIRAMFIN SHYAMMETL SIEMENS SIGNATURE SJVN SOBHA SOLARINDS SONACOMS SONATSOFTW SPLPETRO SRF STARHEALTH SUMICHEM SUNDARMFIN SUNPHARMA SUNTV SUPREMEIND SUZLON SWANCORP SWIGGY SYNGENE SYRMA
+TARIL TATACAP TATACHEM TATACOMM TATACONSUM TATAELXSI TATAINVEST TATAPOWER TATASTEEL TATATECH TBOTEK TCS TECHM TECHNOE TEGA TEJASNET TENNIND THELEELA THERMAX TIINDIA TIMKEN TITAGARH TITAN TMCV TMPV TORNTPHARM TORNTPOWER TRAVELFOOD TRENT TRIDENT TRITURBINE TTML TVSMOTOR
+UBL UCOBANK ULTRACEMCO UNIONBANK UNITDSPR UNOMINDA UPL URBANCO USHAMART UTIAMC
+VBL VEDL VIJAYA VMM VOLTAS VTL
+WAAREEENER WELCORP WELSPUNLIV WHIRLPOOL WIPRO WOCKPHARMA
+YESBANK ZEEL ZENSARTECH ZENTEC ZFCVINDIA ZYDUSLIFE ZYDUSWELL`.split(/\s+/);
+const defaultSettings = {capital:500000,risk:1,rr:2,zone:7,portfolioRisk:5,gap:0.5,deliveryBrokerage:0};
+const samplePlans = () => [['RELIANCE',1400,1370,1460,1392,'Daily'],['TCS',3400,3320,3600,3280,'Weekly'],['HDFCBANK',1800,1760,1880,1695,'Daily'],['INFY',1600,1560,1680,1450,'75 min'],['ITC',420,410,445,416,'Daily'],['TATAMOTORS',800,775,850,758,'Weekly']].map(([symbol,entry,sl,target,cmp,timeframe])=>({id:uid(),symbol,entry,sl,target,cmp,timeframe,qty:Math.min(Math.floor(5000/(entry-sl)),Math.floor(500000/entry)),status:'Watching',notes:'Sample plan',sample:true,expiry:''}));
+let state;
+try { state=JSON.parse(localStorage.getItem('tradeDesk.v1')); } catch {}
+if (!state || !Array.isArray(state.plans) || !state.settings) state={settings:{...defaultSettings},plans:samplePlans(),paused:false};
+if(!state.holdingDates||typeof state.holdingDates!=='object')state.holdingDates={};
+if(!state.holdingDateChecks||typeof state.holdingDateChecks!=='object')state.holdingDateChecks={};
+state.settings={...defaultSettings,...state.settings,deliveryBrokerage:0};
+for(const p of state.plans){
+ if(p.sourceBrokerage===undefined)p.sourceBrokerage=p.source==='Excel'?p.brokerage||0:0;
+ if(!p.targetMode)p.targetMode=Math.abs(p.target-(p.entry+(p.entry-p.sl)*state.settings.rr))>0.011?'manual':'auto';
+ if(p.cmpSource!=='Dhan'){p.spreadsheetCmp=p.spreadsheetCmp??p.cmp;p.cmp=null;p.cmpSource='Awaiting Dhan';}
+ else {p.cmp=null;p.cmpError='Awaiting a fresh Dhan quote';}
+ if(p.exit&&!p.exitSource)p.exitSource=p.source==='Excel'?'Excel':'Paper';
+ if(p.exit&&!p.executedAt&&p.source!=='Excel'){p.executedAt=p.closedAt||'';p.executedDateOnly=!!p.closedDateOnly;}
+ if(p.exit&&!p.completedAt)p.completedAt=p.closedAt||'';
+}
+let editing=null, targetManual=false, workbook={}, staged=[];
+let selectedTradeId=null;
+const sessionPrices=new Map();
+const sessionQuotes=new Map();
+let latestPortfolio=null;
+let portfolioAvailable=false;
+let portfolioReceivedAt=0;
+let portfolioSyncError='';
+const togglingPlans=new Set();
+let deskTheme='light',radarMode='tiles';
+try{deskTheme=localStorage.getItem('deepDesk.theme')==='dark'?'dark':'light';radarMode=localStorage.getItem('deepDesk.radarView')==='watchlist'?'watchlist':'tiles';}catch{}
+function applyDeskTheme(){document.documentElement?.setAttribute('data-theme',deskTheme);$('themeToggle').textContent=deskTheme==='light'?'Dark theme':'Light theme';$('themeToggle').setAttribute?.('aria-label',`Switch to ${deskTheme==='light'?'dark':'light'} theme`);}
+applyDeskTheme();
+$('themeToggle').onclick=()=>{deskTheme=deskTheme==='light'?'dark':'light';applyDeskTheme();try{localStorage.setItem('deepDesk.theme',deskTheme);}catch{}};
+$('radarView').value=radarMode;
+$('radarView').onchange=()=>{radarMode=$('radarView').value==='watchlist'?'watchlist':'tiles';try{localStorage.setItem('deepDesk.radarView',radarMode);}catch{}render();};
+function terminalChart(p){
+ const samples=sessionPrices.get(p.symbol)||[],values=[p.sl,p.entry,p.target,...samples.map(s=>s.price)];
+ let min=Math.min(...values),max=Math.max(...values),pad=(max-min)*.12||1;min-=pad;max+=pad;
+ const y=v=>245-(v-min)/(max-min)*215,x=i=>18+(Date.parse(samples[i].time)-Date.parse(samples[0].time))/Math.max(1,Date.parse(samples.at(-1).time)-Date.parse(samples[0].time))*590;
+ const levels=[['Target',p.target,'#44d3a8'],['Entry',p.entry,'#8eb7ff'],['Stop-loss',p.sl,'#ff8495']].map(([label,value,color])=>`<line x1="12" x2="610" y1="${y(value)}" y2="${y(value)}" stroke="${color}" stroke-opacity=".6" stroke-dasharray="5 5"/><text x="620" y="${y(value)+4}" fill="${color}" font-size="12" font-family="Consolas,monospace">${label} ${escapeHTML(money(value))}</text>`).join('');
+ const path=samples.map((s,i)=>`${i?'L':'M'}${x(i)},${y(s.price)}`).join(' ');
+ const line=samples.length>1?`<path d="${path}" fill="none" stroke="#e4edf7" stroke-width="2"/>`:'';
+ const dot=samples.length?`<circle cx="${x(samples.length-1)}" cy="${y(samples.at(-1).price)}" r="4" fill="#e4edf7"/>`:'';
+ const label=!(p.cmp>0)&&samples.length?'Collected snapshots / current Dhan feed unavailable':samples.length>1?`${samples.length} Dhan snapshots collected since this page opened`:samples.length?'First Dhan snapshot received; waiting for more samples':'Planned levels only / waiting for Dhan prices';
+ return `<svg viewBox="0 0 795 285" role="img" aria-label="Planned entry, stop-loss and target with actual Dhan price snapshots"><rect x="12" y="${y(p.target)}" width="598" height="${y(p.entry)-y(p.target)}" fill="#31c69b" opacity=".055"/><rect x="12" y="${y(p.entry)}" width="598" height="${y(p.sl)-y(p.entry)}" fill="#ff7187" opacity=".055"/>${levels}${line}${dot}<text x="15" y="280" fill="#a1afc2" font-size="12">${escapeHTML(label)}</text></svg>`;
+}
+function renderTerminal(plans){
+ if(!plans.some(p=>p.id===selectedTradeId))selectedTradeId=plans[0]?.id||null;
+ $('radarLayout').classList.toggle('tiles-mode',radarMode==='tiles');
+ if($('filter').value==='Holding'||plans.some(p=>p.accountOnly||p.holdingSource==='Dhan portfolio'||p.status==='Imported holding')){
+  const price=value=>Number.isFinite(value)&&value>0?money(value):'--';
+  $('cards').innerHTML=`<table class="watchlist holding-radar"><thead><tr><th>Holding / source</th><th>Qty</th><th>Average buy</th><th>CMP</th><th>Open P/L</th><th>SL</th><th>Target</th><th>Action</th></tr></thead><tbody>${plans.map(p=>`<tr><td><b>${escapeHTML(p.symbol)}</b><small>${escapeHTML(p.setup||p.holdingBroker||'Account holding')}</small></td><td>${p.qty||'--'}</td><td>${price(p.fill)}</td><td>${price(p.cmp)}</td><td class="${p.pnl<0?'red':'green'}">${Number.isFinite(p.pnl)?money(p.pnl):'--'}</td><td class="red">${price(p.sl)}</td><td class="green">${price(p.target)}</td><td><button data-action="editHolding" data-id="${escapeHTML(p.id)}">Edit levels</button></td></tr>`).join('')||'<tr><td colspan="8" class="empty">No open holdings found.</td></tr>'}</tbody></table>`;
+  $('terminalDetail').innerHTML='<div class="empty">Holdings view shows broker quantities and current prices. Entry readiness filters list waiting setups only.</div>';return;
+ }
+ $('cards').innerHTML=`<table class="watchlist"><thead><tr><th>Stock / TF</th><th>CMP</th><th>Entry</th><th>SL</th><th>Target</th><th>Distance</th><th>Status</th></tr></thead><tbody>${plans.map(p=>`<tr data-action="selectStock" data-id="${escapeHTML(p.id)}" tabindex="0" aria-selected="${p.id===selectedTradeId}" class="${p.id===selectedTradeId?'selected-row':''}"><td><b>${escapeHTML(p.symbol)}</b><small>${escapeHTML(p.timeframe)} / ${escapeHTML(p.setup||'--')}</small></td><td>${p.cmp>0?money(p.cmp):'<span class="muted">No feed</span>'}</td><td class="blue">${money(p.entry)}</td><td class="red">${money(p.sl)}</td><td class="green">${money(p.target)}</td><td class="${category(p)==='ready'?'green':category(p)==='near'?'watch-near':''}">${Number.isFinite(distance(p))?distance(p).toFixed(2)+'%':'--'}</td><td><span class="watch-state">${escapeHTML(p.status)}${expired(p)?' / Expired':''}</span></td></tr>`).join('')||'<tr><td colspan="7" class="empty">No matching setups.</td></tr>'}</tbody></table>`;
+ if(radarMode==='tiles')$('cards').innerHTML=plans.map(p=>`<article class="radar-tile ${category(p)}"><div class="tile-heading"><div><b>${escapeHTML(p.symbol)}</b><small>${escapeHTML(p.timeframe)} / ${escapeHTML(p.setup||'No setup')}</small></div><span class="pill status">${escapeHTML(p.status)}</span></div><div class="tile-cmp"><span>Dhan CMP</span><b>${p.cmp>0?money(p.cmp):'Awaiting feed'}</b></div><div class="tile-distance">${Number.isFinite(distance(p))?distance(p).toFixed(2)+'% from entry':'Price unavailable'}${expired(p)?' / Expired':''}</div><div class="ticket-levels"><div><small>ENTRY</small><b class="blue">${money(p.entry)}</b></div><div><small>SL</small><b class="red">${money(p.sl)}</b></div><div><small>TARGET</small><b class="green">${money(p.target)}</b></div></div><div class="tile-sizing"><span>${p.qty} shares</span><span>R:R 1:${((p.target-p.entry)/(p.entry-p.sl)).toFixed(2)}</span></div><div class="actions"><button data-action="chartStock" data-id="${escapeHTML(p.id)}">Chart & details</button>${p.status==='Watching'?`<button data-action="edit" data-id="${escapeHTML(p.id)}">Edit</button>`:''}</div></article>`).join('')||'<div class="empty">No matching setups.</div>';
+ const p=plans.find(p=>p.id===selectedTradeId);
+ if(!p){$('terminalDetail').innerHTML='<div class="empty">Select a setup from the watchlist.</div>';return;}
+ $('terminalDetail').innerHTML=`<div class="instrument-heading"><div><h2>${escapeHTML(p.symbol)}</h2><span>NSE / CNC / ${escapeHTML(p.timeframe)} / ${escapeHTML(p.setup||'No setup')}</span></div><div class="instrument-price"><b>${p.cmp>0?money(p.cmp):'Awaiting Dhan'}</b><small>${p.cmp>0?'Dhan LTP snapshot':'Market data not connected'}</small></div></div><div class="terminal-chart">${terminalChart(p)}</div><div class="ticket-levels"><div><small>ENTRY</small><b class="blue">${money(p.entry)}</b></div><div><small>STOP-LOSS</small><b class="red">${money(p.sl)}</b></div><div><small>TARGET</small><b class="green">${money(p.target)}</b></div></div><dl class="ticket-facts"><div><dt>Quantity</dt><dd>${p.qty} shares</dd></div><div><dt>Risk / reward</dt><dd>1:${((p.target-p.entry)/(p.entry-p.sl)).toFixed(2)}</dd></div><div><dt>Planned price risk</dt><dd class="red">${money(p.qty*(p.entry-p.sl))}</dd></div><div><dt>Potential profit</dt><dd class="green">${money(p.qty*(p.target-p.entry))}</dd></div><div><dt>Required capital</dt><dd>${money(p.requiredMargin)}</dd></div><div><dt>Status</dt><dd>${escapeHTML(p.status)}</dd></div></dl><div class="ticket-note">${escapeHTML(p.notes||'No trade notes added.')}</div><div class="actions terminal-actions"><button data-action="edit" data-id="${escapeHTML(p.id)}" ${p.status!=='Watching'?'disabled title="Only watching plans can be edited here"':''}>Edit plan</button>${p.status==='Watching'?`<button data-action="arm" data-id="${escapeHTML(p.id)}">Arm paper</button>`:p.status==='Armed'?`<button data-action="disarm" data-id="${escapeHTML(p.id)}">Disarm paper</button>`:''}</div><p class="hint">The per-plan Enabled switch controls automatic live execution when global live mode is on. Entry must be observed touching/crossing the planned price; delivery orders are prechecked before the server queues them.</p>`;
+}
+function toast(text){$('toast').textContent=text;$('toast').classList.remove('hidden');clearTimeout(toast.timer);toast.timer=setTimeout(()=>$('toast').classList.add('hidden'),5000);}
+function save(){try{localStorage.setItem('tradeDesk.v1',JSON.stringify(state));}catch{toast('Storage failed. Export a backup before closing.');}render();}
+function page(name){for(const id of ['performanceStats','stats'])$(id).classList.toggle('hidden',name!=='completed');if(globalThis.history&&globalThis.location)globalThis.history.replaceState(null,'','#'+name);for(const s of ['dashboard','planner','completed','importer','live','settings','chartlab'])$(s).classList.toggle('hidden',s!==name);document.querySelectorAll('nav button').forEach(b=>{b.classList.toggle('active',b.dataset.page===name);b.setAttribute?.('aria-current',b.dataset.page===name?'page':'false');});$('pageLabel').textContent=({dashboard:'MARKET RADAR / DELIVERY EQUITIES',planner:'TRADE PLANS / POSITION SIZING',completed:'COMPLETED TRADES / PERFORMANCE ANALYSIS',importer:'DATA WORKSPACE / IMPORT & EXPORT',live:'HOLDINGS / LIVE DELIVERY',chartlab:'LOCAL AI CHART LAB / EXPERIMENTAL',settings:'PREFERENCES / DHAN CONNECTION'})[name]||'DEEP TRADING DESK';}
+document.querySelector('nav').addEventListener('click',e=>{const button=e.target.closest('[data-page]');if(button)page(button.dataset.page);});
+function calc(entry,sl,target){return TradeMath.calculate(entry,sl,target,state.settings);}
+function valid(p){if(!/^[A-Z0-9&._ -]{1,30}$/.test(p.symbol))return 'Enter a valid stock symbol.';if(![p.entry,p.sl,p.target].every(n=>Number.isFinite(n)&&n>0))return 'Entry, stop-loss and target must be positive numbers.';if(!(p.sl<p.entry&&p.target>p.entry))return 'For delivery buys, SL must be below entry and target above entry.';if(p.expiry&&!/^\d{4}-\d{2}-\d{2}$/.test(p.expiry))return 'Use YYYY-MM-DD for expiry.';if(!Number.isInteger(p.qty)||p.qty<1)return 'Quantity must be a positive whole number.';if(p.brokerageMode==='manual'&&(!Number.isFinite(p.manualBrokerage)||p.manualBrokerage<0))return 'Brokerage must be zero or positive.';return '';}
+function distance(p){return p.entry>0&&p.cmp>0?Math.abs(p.cmp-p.entry)/p.entry*100:Infinity;}
+function category(p){return distance(p)<=2?'ready':distance(p)<=state.settings.zone?'near':'far';}
+function positions(){return state.plans.filter(p=>['Armed','Holding','Imported holding','Live armed','Live entry pending','Live submitting','Live partial fill','Live holding','Live exit pending','Live action required'].includes(p.status));}
+const COMPLETED_PENDING='Completed - details pending';
+function completedRecords(){return state.plans.filter(p=>['Target hit','SL hit','Closed',COMPLETED_PENDING].includes(p.status));}
+function closed(){return state.plans.filter(p=>['Target hit','SL hit','Closed'].includes(p.status));}
+function migrateSavedHoldings(){
+ let count=0;const aliases={'imported holding':'Imported holding','live holding':'Live holding','live partial fill':'Live partial fill','holding':'Holding'};
+ for(const p of state.plans){
+  const previous=p.status,label=String(p.status||'').trim().toLowerCase(),actualQty=Number.isSafeInteger(p.sourceQty)&&p.sourceQty>0?p.sourceQty:null;
+  if(p.liveState&&p.liveState!=='DISARMED')continue;
+  const ended={'closed':'Closed','target hit':'Target hit','sl hit':'SL hit','completed - details pending':COMPLETED_PENDING}[label];
+  if(ended){p.status=ended;if(p.status!==previous)count++;continue;}
+  if(p.exit>0||p.sourceSale>0)continue;
+  if(aliases[label])p.status=aliases[label];
+  const knownZerodha=p.holdingBroker==='Zerodha'||['TMPV','JKTYRE'].includes(p.symbol)&&actualQty;
+  const recordedOpen=['open','ongoing','live','executed','bought','in position'].includes(label)&&p.qty>0&&(actualQty||p.fill>0);
+  if(p.holdingSource==='Dhan portfolio'||knownZerodha&&actualQty||recordedOpen){
+   p.status='Imported holding';p.qty=actualQty||p.qty;p.qtyMode='manual';p.fill=p.fill||p.entry;
+   if(knownZerodha)p.holdingBroker='Zerodha';p.journalEdited=true;
+  }
+  if(p.status!==previous)count++;
+ }
+ return count;
+}
+function planEnableButton(p){const editable=['Watching','Armed','Live armed'].includes(p.status);return `<button class="entry-switch ${p.enabled===false?'entry-off':'entry-on'}" data-action="toggleEnabled" data-id="${escapeHTML(p.id)}" aria-pressed="${p.enabled!==false}" title="${editable?'Controls automatic live execution for this plan when global live mode is on':'Entry already submitted or executed; manage existing orders in Dhan'}" ${!editable||togglingPlans.has(p.id)?'disabled':''}>${togglingPlans.has(p.id)?'Updating...':!editable?'Entry submitted':p.enabled===false?'Disabled':'Enabled'}</button>`;}
+async function togglePlanEnabled(p){
+ if(togglingPlans.has(p.id)||!['Watching','Armed','Live armed'].includes(p.status))return;
+ togglingPlans.add(p.id);render();const enabled=p.enabled===false;
+ try{const response=await fetch('/api/live/plan-enabled',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tradeId:p.id,enabled}),signal:AbortSignal.timeout(15000)});const data=await response.json();if(!response.ok)throw Error(data.error||'Could not update trade enable status.');p.enabled=enabled;if(!enabled&&['Armed','Live armed'].includes(p.status)){p.status='Watching';if(p.liveState==='ARMED')p.liveState='DISARMED';}TradeDeskData.setPlanFlags(data.planEnabled);TradeDeskData.setLiveRecords(data.records||[]);save();if(enabled&&globalThis.LiveDesk){const result=await globalThis.LiveDesk.activatePlan(p);if(result?.error)toast(`${p.symbol} is enabled, but live checks blocked it: ${result.error}`);else if(result?.armed)toast(`${p.symbol} enabled and queued for automatic live execution.`);else toast(`${p.symbol} enabled. Global live execution is paused; it will be checked when you enable live execution.`);}else toast('Trade disabled. New entries are blocked; an unsent order was disarmed.');}
+ catch(error){toast(error.message);}finally{togglingPlans.delete(p.id);render();}
+}
+function tradePnl(p){return TradeMath.realized(p);}
+function chargeText(p){const c=TradeMath.deliveryCharges(p);return !c?'External broker fees not recorded':c.mode+': '+Object.entries(c).filter(([key])=>key!=='mode').map(([key,value])=>key+' '+money(value)).join(' / ');}
+let holdingEditingId=null;
+function canEditHolding(p){return (p.accountOnly&&p.holdingBroker==='Dhan'||p.status==='Imported holding')&&(!p.liveState||p.liveState==='DISARMED')&&p.exitSource!=='Dhan execution';}
+function openHoldingEditor(p){
+ if(!canEditHolding(p))return toast('This holding cannot be edited while a broker exit is active.');
+ holdingEditingId=p.id;$('holdingEditorTitle').textContent=`Edit holding / ${p.symbol}`;
+ $('holdingQty').value=p.qty||'';$('holdingBuy').value=p.fill||'';const brokerOwned=p.accountOnly||p.holdingSource==='Dhan portfolio';$('holdingQty').readOnly=brokerOwned;$('holdingBuy').readOnly=brokerOwned;$('holdingSL').value=p.sl||'';$('holdingTarget').value=p.target||'';
+ $('holdingEditor').classList.remove('hidden');page('live');$('holdingEditor').scrollIntoView?.({behavior:'smooth',block:'start'});
+}
+$('cancelHoldingEdit').onclick=()=>{holdingEditingId=null;$('holdingEditor').classList.add('hidden');};
+$('holdingForm').onsubmit=async event=>{
+ event.preventDefault();const p=state.plans.find(p=>p.id===holdingEditingId);if(!p||!canEditHolding(p))return toast('This holding is no longer editable.');
+ const qty=+$('holdingQty').value,fill=+$('holdingBuy').value,sl=+$('holdingSL').value,target=+$('holdingTarget').value;
+ if(!Number.isSafeInteger(qty)||qty<=0||!Number.isFinite(fill)||fill<=0||![sl,target].every(n=>Number.isFinite(n)&&n>0)||!(sl<target))return toast('Enter a positive quantity, buy price and valid SL below target.');
+ if(p.accountOnly&&latestPortfolio?.holdings.filter(r=>r.symbol===p.symbol).length!==1)return toast('Unable to uniquely match this Dhan holding.');
+ try{const response=await fetch('/api/live/status',{cache:'no-store'});if(!response.ok)throw Error('Cannot verify live records. Start the backend and try again.');const ledger=await response.json();if(ledger.unverifiedActiveCount||ledger.records?.some(r=>r.tradeId===p.id&&r.state!=='DISARMED'))return toast('Reconcile this broker-managed holding through Dhan.');}catch(error){return toast(error.message);}
+ if(p.id!==holdingEditingId||!canEditHolding(p))return;
+ if(!p.accountOnly&&p.holdingSource!=='Dhan portfolio')Object.assign(p,{qty,fill,sourceQty:qty,holdingDetailsPending:false});
+ Object.assign(p,{sl,target,targetMode:'manual',journalEdited:true});
+ if(p.accountOnly||p.holdingSource==='Dhan portfolio'){state.holdingLevels=state.holdingLevels||{};const security=p.securityId||latestPortfolio?.holdings.find(r=>r.symbol===p.symbol)?.securityId;if(latestPortfolio&&security)state.holdingLevels[`${latestPortfolio.clientId}:${security}`]={sl,target};}
+ p.notes=(p.notes||'').replace('Holding confirmed; actual bought quantity and average buy price pending.','').trim();
+ holdingEditingId=null;$('holdingEditor').classList.add('hidden');save();toast(`${p.symbol}: holding details saved. No broker order placed.`);
+};
+let saleEditingId=null,manualExecutionId=null,dhanMatchedTrades=[],selectedDhanTrade=null,dhanHistoryRequest=0;
+function canRecordSale(p){return !p.liveState||p.liveState==='DISARMED'?p.exitSource!=='Dhan execution'&&['Watching','Imported holding','Closed',COMPLETED_PENDING].includes(p.status):false;}
+function openSaleEditor(p){
+ if(!canRecordSale(p))return toast('Broker-verified or active trades must be reconciled through Dhan.');
+ saleEditingId=p.id;$('saleEditorTitle').textContent=`${p.exit?'Edit sale':'Record completed trade'} / ${p.symbol}`;
+ $('saleBuy').value=p.fill||p.entry;$('salePrice').value=p.exit||p.sourceSale||'';
+ const formatDate=value=>{if(!value||!Number.isFinite(Date.parse(value)))return '';return /^\d{4}-\d{2}-\d{2}$/.test(value)?value:new Date(value).toLocaleDateString('en-CA',{timeZone:'Asia/Kolkata'});};$('saleExecutionDate').value=formatDate(p.executedAt||p.filledAt);$('saleDate').value=formatDate(p.completedAt||p.closedAt);
+ const historyEnd=new Date(),historyStart=new Date();historyStart.setFullYear(historyStart.getFullYear()-2);$('dhanHistoryFrom').value=formatDate(historyStart.toISOString());$('dhanHistoryTo').value=localDate();dhanMatchedTrades=[];selectedDhanTrade=null;$('dhanTradeCandidateLabel').classList.add('hidden');$('dhanTradeCandidate').innerHTML='';$('applyDhanTradeDates').disabled=true;$('dhanTradeHistoryStatus').textContent='Search read-only Dhan CNC trade history. No order will be placed.';
+ $('saleQty').value=p.status==='Closed'||p.status==='Imported holding'?p.qty:p.sourceQty>0?p.sourceQty:'';
+ $('saleChargesMode').value=p.actualTotalCharges!==undefined&&p.actualTotalCharges!==null?'actual':'auto';$('saleActualCharges').value=p.actualTotalCharges??'';
+ $('saleBrokerage').value=p.brokerage||0;$('saleBrokerageMode').value=p.brokerage>0?'manual':'auto';updateSaleFee();$('saleNotes').value=p.notes||'';
+ $('saleEditor').classList.remove('hidden');page('completed');previewSale();
+}
+function updateSaleFee(){const automatic=$('saleBrokerageMode').value!=='manual';$('saleBrokerage').readOnly=automatic;if(automatic)$('saleBrokerage').value='0.00';}
+$('saleBrokerageMode').onchange=()=>{updateSaleFee();previewSale();};
+function previewSale(){const quantity=+$('saleQty').value,buy=+$('saleBuy').value,sell=+$('salePrice').value,fee=+$('saleBrokerage').value;
+ const original=state.plans.find(p=>p.id===saleEditingId),p={qty:quantity,fill:buy,exit:sell,brokerage:fee,holdingBroker:original?.holdingBroker,actualTotalCharges:$('saleChargesMode').value==='actual'&&$('saleActualCharges').value!==''?+$('saleActualCharges').value:null};
+ $('saleActualCharges').readOnly=$('saleChargesMode').value!=='actual';
+ $('salePreview').textContent=quantity>0&&buy>0&&sell>0?`Sale value: ${money(quantity*sell)} / Net P/L: ${money(TradeMath.realized(p))} / ${chargeText(p)}`:'Enter actual executed quantity and buy/sell prices.';
+}
+$('saleChargesMode').onchange=previewSale;$('saleActualCharges').addEventListener('input',previewSale);
+for(const id of ['saleBuy','salePrice','saleQty','saleBrokerage'])$(id).addEventListener('input',previewSale);
+$('searchDhanTrades').onclick=async()=>{
+ const p=state.plans.find(p=>p.id===saleEditingId),fromDate=$('dhanHistoryFrom').value,toDate=$('dhanHistoryTo').value,requestId=++dhanHistoryRequest;
+ if(!p)return toast('Open a completed-trade record first.');
+ if(!fromDate||!toDate||fromDate>toDate)return toast('Choose a valid Dhan history date range.');
+ $('searchDhanTrades').disabled=true;$('applyDhanTradeDates').disabled=true;$('dhanTradeHistoryStatus').textContent=`Searching Dhan CNC trade history for ${p.symbol}...`;
+ try{
+  const response=await fetch('/api/dhan/trade-history',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:p.symbol,fromDate,toDate}),cache:'no-store'}),data=await response.json();
+  if(!response.ok)throw Error(data.error||'Dhan trade history could not be read.');if(requestId!==dhanHistoryRequest)return;
+  const buys=(data.orders||[]).filter(o=>o.side==='BUY'),sells=(data.orders||[]).filter(o=>o.side==='SELL'),expectedQty=+$('saleQty').value||0,buyPrice=+$('saleBuy').value,sellPrice=+$('salePrice').value;
+  const closePrice=(actual,expected)=>!(actual>0&&expected>0)||Math.abs(actual-expected)/expected<=0.03;
+  dhanMatchedTrades=[];
+  for(const buy of buys)for(const sell of sells){if(buy.orderId===sell.orderId||buy.quantity!==sell.quantity||expectedQty&&buy.quantity!==expectedQty||!closePrice(buy.averagePrice,buyPrice)||!closePrice(sell.averagePrice,sellPrice)||buy.firstTradeAt&&sell.lastTradeAt&&buy.firstTradeAt>sell.lastTradeAt)continue;dhanMatchedTrades.push({buy,sell,score:(buyPrice>0?Math.abs(buy.averagePrice-buyPrice)/buyPrice:0)+(sellPrice>0?Math.abs(sell.averagePrice-sellPrice)/sellPrice:0)});}
+  dhanMatchedTrades.sort((a,b)=>a.score-b.score||String(a.buy.firstTradeAt).localeCompare(String(b.buy.firstTradeAt)));
+  $('dhanTradeCandidate').innerHTML=dhanMatchedTrades.map((m,i)=>`<option value="${i}">${escapeHTML(m.buy.firstTradeAt||'BUY date unavailable')} · BUY ${m.buy.quantity} @ ${money(m.buy.averagePrice)} / SELL ${money(m.sell.averagePrice)} · ${escapeHTML(m.sell.lastTradeAt||'exit date unavailable')}</option>`).join('');
+  $('dhanTradeCandidateLabel').classList.toggle('hidden',!dhanMatchedTrades.length);selectedDhanTrade=dhanMatchedTrades.length?0:null;$('applyDhanTradeDates').disabled=!dhanMatchedTrades.length;
+  $('dhanTradeHistoryStatus').textContent=dhanMatchedTrades.length?`${dhanMatchedTrades.length} possible BUY/SELL pair(s) found for ${p.symbol}. Review the dates, quantity and fills, then apply the correct Dhan trade.${data.truncated?' Search a shorter date range if the correct trade is missing; Dhan returned the first 20 pages.':''}`:`No matching Dhan BUY/SELL pair found for ${p.symbol}. Widen the date range, or enter the executed quantity and approximate fill prices above to narrow the results.${data.truncated?' Dhan returned the first 20 pages; narrow the date range.':''}`;
+ }catch(error){if(requestId===dhanHistoryRequest)$('dhanTradeHistoryStatus').textContent=error.message;}finally{if(requestId===dhanHistoryRequest)$('searchDhanTrades').disabled=false;}
+};
+$('dhanTradeCandidate').onchange=()=>{const index=+$('dhanTradeCandidate').value;selectedDhanTrade=dhanMatchedTrades[index]?index:null;$('applyDhanTradeDates').disabled=selectedDhanTrade===null;};
+$('applyDhanTradeDates').onclick=()=>{const match=dhanMatchedTrades[selectedDhanTrade];if(!match)return;const entryDate=String(match.buy.firstTradeAt||'').slice(0,10),exitDate=String(match.sell.lastTradeAt||'').slice(0,10);if(/^\d{4}-\d{2}-\d{2}$/.test(entryDate))$('saleExecutionDate').value=entryDate;if(/^\d{4}-\d{2}-\d{2}$/.test(exitDate))$('saleDate').value=exitDate;$('saleQty').value=match.buy.quantity;$('saleBuy').value=match.buy.averagePrice.toFixed(4);$('salePrice').value=match.sell.averagePrice.toFixed(4);selectedDhanTrade=match;updateSaleFee();previewSale();$('dhanTradeHistoryStatus').textContent=`Dhan dates and fills applied: entry ${entryDate||'unavailable'}, completion ${exitDate||'unavailable'}. Review or edit before saving.`;};
+$('cancelManualExecution').onclick=()=>{$('manualExecutionEditor').classList.add('hidden');manualExecutionId=null;};
+function openManualExecution(p){if(!p||p.status!=='Watching'||p.liveState&&p.liveState!=='DISARMED')return toast('Only an unexecuted waiting plan can record a manual fill.');if(ongoingTrades().some(x=>x.symbol===p.symbol))return toast('An open holding already exists for this stock. Add the fill to that holding instead of creating a duplicate.');manualExecutionId=p.id;$('manualExecutionTitle').textContent=`Record confirmed fill / ${p.symbol}`;$('manualQty').value=p.qty||'';$('manualFill').value=p.entry||'';$('manualExecutedDate').value=localDate();$('manualExecutionStatus').textContent='Confirm this entry already filled at your broker. No order will be sent.';$('manualExecutionEditor').classList.remove('hidden');window.scrollTo(0,0);}
+$('cancelSaleEdit').onclick=()=>{saleEditingId=null;$('saleEditor').classList.add('hidden');};
+$('manualExecutionForm').onsubmit=async event=>{event.preventDefault();const p=state.plans.find(p=>p.id===manualExecutionId),qty=+$('manualQty').value,fill=+$('manualFill').value,date=$('manualExecutedDate').value;if(!p||p.status!=='Watching'||p.liveState&&p.liveState!=='DISARMED')return toast('This plan was already executed or is unavailable.');if(!Number.isSafeInteger(qty)||qty<1||!Number.isFinite(fill)||fill<=0||!/^\d{4}-\d{2}-\d{2}$/.test(date)||date>localDate())return toast('Enter positive fill details and a valid past or current execution date.');if(ongoingTrades().some(x=>x.symbol===p.symbol))return toast('An open holding already exists for this stock. No duplicate recorded.');try{const response=await fetch('/api/live/status',{cache:'no-store'});if(!response.ok)throw Error('Cannot verify broker execution status.');const ledger=await response.json();if(ledger.unverifiedActiveCount||ledger.records?.some(r=>r.tradeId===p.id&&r.state!=='DISARMED')||ledger.records?.some(r=>r.symbol===p.symbol&&r.state!=='DISARMED'&&r.state!=='CLOSED'))return toast('An existing app-managed execution needs reconciliation; no duplicate recorded.');if(latestPortfolio?.positions.some(r=>r.symbol===p.symbol&&r.quantity!==0)||latestPortfolio?.holdings.some(r=>r.symbol===p.symbol&&r.quantity>0))return toast('Dhan already reports exposure in this stock. Link the holding instead of creating a duplicate.');}catch(error){return toast(error.message);}if(p.status!=='Watching'||ongoingTrades().some(x=>x.symbol===p.symbol))return toast('Trade changed during verification. No duplicate recorded.');Object.assign(p,{status:'Imported holding',holdingBroker:'Recorded / manual',qty,fill,sourceQty:qty,executedAt:date,executedDateOnly:true,holdingDetailsPending:false,qtyMode:'manual',source:'Manual execution',journalEdited:true});manualExecutionId=null;$('manualExecutionEditor').classList.add('hidden');save();toast(`${p.symbol}: confirmed manual fill recorded. No broker order sent.`);};
+$('saleForm').onsubmit=async event=>{
+ event.preventDefault();updateSaleFee();if($('saleChargesMode').value==='actual'&&(!Number.isFinite(+$('saleActualCharges').value)||+$('saleActualCharges').value<0||$('saleActualCharges').value===''))return toast('Enter the full charges total from your contract note.');const p=state.plans.find(p=>p.id===saleEditingId);if(!p||!canRecordSale(p))return toast('This trade is no longer editable.');
+ const quantity=+$('saleQty').value,buy=+$('saleBuy').value,sell=+$('salePrice').value,fee=+$('saleBrokerage').value,date=$('saleDate').value,executionDate=$('saleExecutionDate').value;
+ if(!Number.isInteger(quantity)||quantity<=0||![buy,sell].every(n=>Number.isFinite(n)&&n>0)||!Number.isFinite(fee)||fee<0)return toast('Enter positive actual prices, a whole executed quantity and non-negative brokerage.');
+ if(executionDate&&(!/^\d{4}-\d{2}-\d{2}$/.test(executionDate)||!Number.isFinite(Date.parse(executionDate))||new Date(executionDate).toISOString().slice(0,10)!==executionDate||executionDate>localDate()))return toast('Enter a valid past or current execution date, or leave it blank.');
+ if(date&&(!/^\d{4}-\d{2}-\d{2}$/.test(date)||!Number.isFinite(Date.parse(date))||new Date(date).toISOString().slice(0,10)!==date||date>localDate()))return toast('Enter a valid past or current sale date, or leave it blank.');
+ try{const response=await fetch('/api/live/status',{cache:'no-store'});if(!response.ok)throw Error('Cannot verify live order records. Retry after the backend is available.');const ledger=await response.json();if(ledger.unverifiedActiveCount||ledger.records?.some(r=>r.tradeId===p.id&&r.state!=='DISARMED'))return toast('This trade has a live broker record or needs reconnection. Reconcile it through Dhan instead of entering a manual sale.');}catch(error){return toast(error.message);}
+ if(p.id!==saleEditingId||!canRecordSale(p))return;
+ Object.assign(p,{actualTotalCharges:$('saleChargesMode').value==='actual'?+$('saleActualCharges').value:null,holdingDetailsPending:false,status:'Closed',qty:quantity,fill:buy,exit:sell,sourceQty:quantity,sourceSale:sell,sourceBrokerage:fee,brokerage:fee,brokerageMode:$('saleBrokerageMode').value==='manual'?'manual':'auto',manualBrokerage:fee,source:'Manual journal',exitSource:'Manual journal',journalEdited:true,notes:$('saleNotes').value,closedAt:date||'',closedDateOnly:!!date,completedAt:date||'',executedAt:executionDate||p.executedAt||p.filledAt||'',executedDateOnly:!!(executionDate||p.executedDateOnly),dhanEntryOrderId:selectedDhanTrade?.buy?.orderId||p.dhanEntryOrderId||'',dhanExitOrderId:selectedDhanTrade?.sell?.orderId||p.dhanExitOrderId||'',tradeDatesSource:selectedDhanTrade?'Dhan trade history':p.tradeDatesSource||''});
+ saleEditingId=null;$('saleEditor').classList.add('hidden');$('completedSearch').value=p.symbol;$('completedOutcome').value='all';$('completedSource').value='all';$('completedTimeframe').value='all';save();toast(`${p.symbol}: completed sale saved. P&L recalculated; no broker order placed.`);
+};
+function performanceSummary(plans){
+ const pnl=plans.filter(p=>['Target hit','SL hit','Closed'].includes(p.status)).map(tradePnl).filter(Number.isFinite);
+ const wins=pnl.filter(n=>n>0).length,losses=pnl.filter(n=>n<0).length;
+ const profit=Math.round(pnl.filter(n=>n>0).reduce((s,n)=>s+n,0)*100)/100;
+ const loss=Math.round(-pnl.filter(n=>n<0).reduce((s,n)=>s+n,0)*100)/100;
+ return {total:pnl.length,wins,losses,breakeven:pnl.length-wins-losses,winRate:pnl.length?wins/pnl.length*100:0,profit,loss,net:Math.round((profit-loss)*100)/100};
+}
+function localDate(){return new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());}
+function expired(p){return p.expiry&&p.expiry<localDate();}
+function openPlans(){return state.plans.filter(p=>!['Target hit','SL hit','Closed',COMPLETED_PENDING].includes(p.status));}
+function waitingPlans(){return openPlans().filter(p=>['Watching','Armed','Live armed','Live entry pending','Live submitting'].includes(p.status)&&!(p.liveFilledQty>0)&&p.holdingSource!=='Dhan portfolio');}
+function ongoingBroker(p){const broker=String(p.holdingBroker||'').trim();return /^dhan$/i.test(broker)?'Dhan':/^zerodha$/i.test(broker)?'Zerodha':broker||((p.source==='Dhan live'||p.liveState&&p.liveState!=='DISARMED')?'Dhan':p.status==='Holding'?'Paper':'Recorded / manual');}
+function ongoingTrades(){
+ const local=openPlans().filter(p=>['Holding','Imported holding','Live partial fill','Live holding','Live exit pending','Live action required'].includes(p.status)||p.holdingSource==='Dhan portfolio'||p.liveFilledQty>0);
+ if(!latestPortfolio)return local;
+ const symbol=value=>String(value||'').trim().toUpperCase(),rows=[],represented=new Set(),held=new Set(latestPortfolio.holdings.map(r=>symbol(r.symbol)));
+ for(const [kind,list] of [['holding',latestPortfolio.holdings],['position',latestPortfolio.positions]])for(const row of list){
+  if(kind==='position'&&held.has(symbol(row.symbol)))continue;
+  const matches=local.filter(p=>ongoingBroker(p)==='Dhan'&&symbol(p.symbol)===symbol(row.symbol)&&(!p.securityId||String(p.securityId)===String(row.securityId))&&(!p.holdingAccount||p.holdingAccount===latestPortfolio.clientId));
+  const plan=matches.length===1?matches[0]:null;for(const p of matches)represented.add(p.id);
+  const quote=sessionQuotes.get(symbol(row.symbol)),cmp=quote?.price>0?quote.price:null,openPnl=cmp&&row.averagePrice>0?TradeMath.round((cmp-row.averagePrice)*row.quantity):kind==='position'?row.unrealizedProfit:null;
+  const levels=state.holdingLevels?.[`${latestPortfolio.clientId}:${row.securityId}`]||{};
+  const holdingDateKey=`${latestPortfolio.clientId}:${row.securityId}`,entryDate=plan?.executedAt||state.holdingDates[holdingDateKey]?.executedAt||'';
+  const account={symbol:symbol(row.symbol),holdingBroker:'Dhan',qty:row.quantity,fill:row.averagePrice,holdingVerified:portfolioAvailable,cmp,pnl:openPnl,securityId:String(row.securityId),sl:plan?.sl??levels.sl??null,target:plan?.target??levels.target??null,executedAt:entryDate,holdingDateKey};
+  if(plan)rows.push({...plan,...account});
+  else {rows.push({...account,id:'account-'+row.securityId,setup:'',timeframe:'',entry:null,accountOnly:true,status:portfolioAvailable?'Dhan '+kind:'Last verified Dhan '+kind,notes:matches.length?'Dhan account total; multiple local strategy records need matching.':'Fetched from Dhan account. No strategy plan linked.'});}
+ }
+ return [...rows,...local.filter(p=>!represented.has(p.id))];
+}
+function ongoingTradesView(){const query=($('ongoingSearch').value||'').trim().toUpperCase(),broker=$('ongoingBroker').value||'all';return ongoingTrades().filter(p=>[p.symbol,p.setup,p.notes].join(' ').toUpperCase().includes(query)&&(broker==='all'||ongoingBroker(p)===broker));}
+const dhanDateRequests=new Set();
+const dhanDateQueue=[];let dhanDateQueueRunning=false;
+async function dhanHoldingEntryDate(symbol,quantity){
+ const end=localDate(),startDate=new Date(`${end}T12:00:00+05:30`);startDate.setFullYear(startDate.getFullYear()-5);const fromDate=startDate.toLocaleDateString('en-CA',{timeZone:'Asia/Kolkata'});
+ const response=await fetch('/api/dhan/trade-history',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol,fromDate,toDate:end}),cache:'no-store'}),data=await response.json();
+ if(!response.ok)throw Error(data.error||'Dhan trade history could not be read.');if(data.truncated)throw Error('Dhan returned only the first 20 history pages; narrow the date range to review the trade.');
+ const lots=[];for(const trade of (data.orders||[]).slice().sort((a,b)=>String(a.firstTradeAt).localeCompare(String(b.firstTradeAt)))){if(!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(trade.firstTradeAt||''))continue;if(trade.side==='BUY')lots.push({quantity:trade.quantity,date:trade.firstTradeAt.slice(0,10)});else if(trade.side==='SELL'){let remaining=trade.quantity;for(const lot of lots){const used=Math.min(lot.quantity,remaining);lot.quantity-=used;remaining-=used;if(!remaining)break;}}}
+ const remaining=lots.reduce((sum,lot)=>sum+lot.quantity,0);if(remaining!==quantity)throw Error(`Dhan history leaves ${remaining} share(s) after buys and sells, but Holdings shows ${quantity}. Review the history manually; no date was saved.`);const entry=lots.find(lot=>lot.quantity>0)?.date;if(!entry)throw Error('No remaining Dhan BUY fill was found for this holding.');return entry;
+}
+function queueDhanHoldingDateLookups(snapshot){
+ if(!portfolioAvailable||!snapshot?.clientId)return;const rows=[...(snapshot.holdings||[]),...(snapshot.positions||[])],unique=new Map(rows.map(row=>[`${snapshot.clientId}:${row.securityId}`,row]));
+ for(const [key,row] of unique){const plan=state.plans.find(p=>p.symbol===row.symbol&&p.holdingSource==='Dhan portfolio'&&p.holdingAccount===snapshot.clientId),known=plan?.executedAt||state.holdingDates[key]?.executedAt;if(known)continue;const check=state.holdingDateChecks[key]||{},previous=Date.parse(check.attemptedAt||''),requestKey=key;if(dhanDateRequests.has(requestKey)||check.version===2&&Number.isFinite(previous)&&Date.now()-previous<300000)continue;dhanDateRequests.add(requestKey);state.holdingDateChecks[key]={attemptedAt:new Date().toISOString(),error:'',version:2};dhanDateQueue.push({key,row,snapshot});}
+ if(!dhanDateQueueRunning&&dhanDateQueue.length){save();dhanDateQueueRunning=true;(async()=>{while(dhanDateQueue.length){const {key,row,snapshot:snapshotData}=dhanDateQueue.shift();try{const entry=await dhanHoldingEntryDate(row.symbol,row.quantity);state.holdingDates[key]={executedAt:entry,source:'Dhan trade history',checkedAt:new Date().toISOString()};const linked=state.plans.filter(p=>p.symbol===row.symbol&&p.holdingSource==='Dhan portfolio'&&p.holdingAccount===snapshotData.clientId);if(linked.length===1)Object.assign(linked[0],{executedAt:entry,executedDateOnly:true,tradeDatesSource:'Dhan trade history',journalEdited:true});state.holdingDateChecks[key].error='';}catch(error){state.holdingDateChecks[key].error=error.message;}finally{dhanDateRequests.delete(key);save();}}dhanDateQueueRunning=false;})();}
+}
+function renderHoldingPnlSummary(){
+ const holdings=ongoingTrades().filter(p=>p.qty>0),positions=latestPortfolio?.positions||[],heldSymbols=new Set((latestPortfolio?.holdings||[]).map(p=>p.symbol)),priced=holdings.filter(p=>Number.isFinite(p.pnl)),positionPnl=positions.filter(p=>Number.isFinite(p.unrealizedProfit)).reduce((sum,p)=>sum+p.unrealizedProfit,0),dematOpenPnl=priced.filter(p=>!heldSymbols.has(p.symbol)).reduce((sum,p)=>sum+p.pnl,0),openPnl=positionPnl+dematOpenPnl,completed=closed().filter(p=>Number.isFinite(tradePnl(p))),realized=completed.reduce((sum,p)=>sum+tradePnl(p),0),todayKey=localDate(),todayClosed=completed.filter(p=>(p.completedAt||p.closedAt||'').slice(0,10)===todayKey),todayKnown=positions.filter(p=>Number.isFinite(p.unrealizedProfit)),todayOpen=todayKnown.reduce((sum,p)=>sum+p.unrealizedProfit,0),today=todayOpen+todayClosed.reduce((sum,p)=>sum+tradePnl(p),0),format=value=>money(Math.round(value*100)/100),tone=value=>value<0?'red':'green',unpriced=holdings.filter(p=>!Number.isFinite(p.pnl)&&!positions.some(row=>row.symbol===p.symbol)),overallOpenKnown=!!latestPortfolio||priced.length>0||holdings.length===0,overall=overallOpenKnown?openPnl+realized:null,todayAvailable=todayKnown.length>0||todayClosed.length>0;
+ $('holdingPnlSummary').innerHTML=[['Overall P/L',overall===null?'--':format(overall),`${positions.length} Dhan position(s), ${priced.length} CMP-priced holdings and ${completed.length} completed trades${unpriced.length?`; ${unpriced.length} holding(s) missing CMP`:''}`,overall===null?'blue':tone(overall)],['Today’s P/L',todayAvailable?format(today):'--',`${todayKnown.length} Dhan open position(s) + ${todayClosed.length} trade(s) completed today`,todayAvailable?tone(today):'blue']].map(([label,value,detail,color])=>`<div class="stat"><small>${label}</small><strong class="${color}">${value}</strong><span>${detail}</span></div>`).join('');
+}
+function renderOngoing(){
+ const rows=ongoingTradesView(),price=value=>Number.isFinite(value)&&value>0?money(value):'--',date=value=>value&&Number.isFinite(Date.parse(value))?(/^\d{4}-\d{2}-\d{2}$/.test(value)?value:new Date(value).toLocaleDateString('en-IN',{timeZone:'Asia/Kolkata'})):'Not recorded';
+ $('ongoingInventory').innerHTML=latestPortfolio?'<span class="hint">'+(portfolioAvailable?'Dhan account holdings: ':'Last verified Dhan holdings: ')+'</span>'+latestPortfolio.holdings.map(row=>`<button type="button" data-action="focusHolding" data-symbol="${escapeHTML(row.symbol)}">${escapeHTML(row.symbol)} / ${escapeHTML(row.quantity)} shares</button>`).join(''):'<span class="hint">'+escapeHTML(portfolioSyncError||'Waiting for the Dhan account snapshot...')+'</span>';
+ $('ongoingRows').innerHTML=rows.map(p=>{
+  const broker=ongoingBroker(p),actual=p.holdingDetailsPending?'Needs details':p.status==='Live partial fill'?p.liveFilledQty:p.status==='Live action required'&&!(p.liveFilledQty>0)?'Check Dhan':p.qty;
+  const actions=p.accountOnly?`<button data-action="refreshPortfolio">Refresh Dhan</button>`:`${p.holdingSource==='Dhan portfolio'?`<button data-action="refreshHolding" data-id="${escapeHTML(p.id)}">Refresh Dhan holding</button>`:''}${canEditHolding(p)?`<button data-action="editHolding" data-id="${escapeHTML(p.id)}">Edit holding</button>`:''}${canRecordSale(p)?`<button data-action="recordSale" data-id="${escapeHTML(p.id)}">${broker==='Zerodha'?'Record Zerodha sale':'Record sale'}</button>`:''}${p.status==='Imported holding'&&broker!=='Zerodha'?`<button data-action="syncSale" data-id="${escapeHTML(p.id)}">Sync Dhan exit</button>`:''}<button data-action="deleteTrade" data-id="${escapeHTML(p.id)}">${broker==='Dhan'?'Remove plan':'Delete'}</button>`;
+  const entryDate=p.executedAt?date(p.executedAt):'Not recorded',checkKey=p.holdingDateKey||`${latestPortfolio?.clientId||''}:${p.securityId||p.symbol}`,dateError=state.holdingDateChecks[checkKey]?.error||'',dateAction=broker==='Dhan'?`<button data-action="fetchHoldingDate" data-id="${escapeHTML(p.id)}" data-symbol="${escapeHTML(p.symbol)}" data-security="${escapeHTML(p.securityId||'')}" data-quantity="${escapeHTML(p.qty||0)}" data-date-key="${escapeHTML(checkKey)}">${entryDate==='Not recorded'?'Retry Dhan date':'Refresh Dhan date'}</button>${dateError?`<small class="stock-sub red">${escapeHTML(dateError)}</small>`:''}`:'';
+  return `<tr><td><b>${escapeHTML(p.symbol)}</b><small class="stock-sub">${escapeHTML(p.setup||'Setup not linked')}</small></td><td>${escapeHTML(p.timeframe||'--')}</td><td>${actions} ${dateAction}</td><td>${escapeHTML(broker)}</td><td>${escapeHTML(actual)}${p.holdingSource==='Dhan portfolio'||p.accountOnly?'<small class="stock-sub">Dhan account quantity</small>':''}</td><td>${price(p.fill)}</td><td>${price(p.entry)}</td><td class="red">${price(p.sl)}</td><td class="green">${price(p.target)}</td><td>${price(p.cmp)}</td><td>${Number.isFinite(p.pnl)?money(p.pnl):'--'}</td><td>${escapeHTML(p.status)}${p.portfolioSyncNote?'<small class="stock-sub">'+escapeHTML(p.portfolioSyncNote)+'</small>':''}</td><td>${escapeHTML(p.notes||'')}</td><td>${escapeHTML(entryDate)}</td></tr>`;
+ }).join('')||'<tr><td colspan="14" class="empty">No open trades match the current filters. Clear filters or sync Dhan holdings.</td></tr>';
+ $('ongoingTabCount').textContent=String(ongoingTrades().length);
+ $('ongoingScope').textContent=`${rows.length} shown / ${ongoingTrades().length} open trades. Dhan refreshes from the account; Zerodha sales are recorded manually.`;
+ renderHoldingPnlSummary();
+}
+function planSortValue(p,field){
+ if(field==='side')return 'BUY';
+ if(field==='status')return [p.status,p.holdingBroker].filter(Boolean).join(' / ');
+ if(field==='qty'&&p.holdingDetailsPending)return null;
+ if(['cmp','diff','diffPercent','distance'].includes(field)){
+  if(!(p.cmp>0&&p.entry>0))return null;
+  return field==='cmp'?p.cmp:field==='diff'?p.cmp-p.entry:field==='distance'?distance(p):(p.cmp-p.entry)/p.entry*100;
+ }
+ if(field==='exit'&&!(p.exit>0))return null;
+ if(field==='rr')return Number.isFinite(p.rr)?p.rr:(p.target-p.entry)/(p.entry-p.sl);
+ const value=p[field];return value===undefined||value===null||value===''||typeof value==='number'&&!Number.isFinite(value)?null:value;
+}
+function updatePlanSortHeaders(){
+ const [field,direction]=($('plansSort').value||'default').split(':');
+ document.querySelectorAll('[data-plan-sort]').forEach(button=>{
+  const active=button.dataset.planSort===field;
+  button.closest('th').setAttribute('aria-sort',active?(direction==='desc'?'descending':'ascending'):'none');
+  button.querySelector('.sort-arrow').textContent=active?(direction==='desc'?' \u2193':' \u2191'):' \u2195';
+ });
+}
+document.querySelectorAll('[data-plan-sort]').forEach(button=>button.addEventListener('click',()=>{
+ const [field,direction]=($('plansSort').value||'default').split(':');
+ $('plansSort').value=button.dataset.planSort+':'+(field===button.dataset.planSort&&direction==='asc'?'desc':'asc');render();
+}));
+function activePlansView(){
+ const query=($('plansSearch').value||'').trim().toUpperCase(),status=$('plansStatus').value||'all';
+ const rows=waitingPlans().filter(p=>[p.symbol,p.setup,p.notes].join(' ').toUpperCase().includes(query)&&
+  (status==='all'||status==='watching'&&p.status==='Watching'||status==='armed'&&/armed|pending|submitting/i.test(p.status)||status==='holding'&&/holding|partial fill/i.test(p.status)||status==='attention'&&/required|rejected|cancelled|expired/i.test(p.status)));
+ const mode=$('plansSort').value||'default';
+ if(mode!=='default'){
+  const [field,direction]=mode==='diffAsc'?['diffPercent','asc']:mode==='diffDesc'?['diffPercent','desc']:mode.split(':');
+  rows.sort((a,b)=>{
+   const x=planSortValue(a,mode==='nearest'?'distance':field),y=planSortValue(b,mode==='nearest'?'distance':field);
+   if(x===null)return y===null?0:1;if(y===null)return -1;
+   const difference=typeof x==='number'&&typeof y==='number'?x-y:String(x).localeCompare(String(y),undefined,{numeric:true,sensitivity:'base'});
+   return direction==='desc'?-difference:difference;
+  });
+ }
+ return rows;
+}
+function tradeOrigin(p){return p.exitSource==='Manual journal'?'Manual':p.exitSource==='Paper'||['Target hit','SL hit'].includes(p.status)&&p.exitSource!=='Dhan execution'?'Paper':p.exitSource==='Dhan execution'||p.source==='Dhan live'?'Dhan':'Excel';}
+function tradeOutcome(p){if(p.status===COMPLETED_PENDING)return 'pending';const pnl=tradePnl(p);return pnl>0?'win':pnl<0?'loss':'breakeven';}
+function completedTradesView(){
+ const query=($('completedSearch').value||'').trim().toUpperCase(),outcome=$('completedOutcome').value||'all',source=$('completedSource').value||'all',tf=$('completedTimeframe').value||'all';
+ return completedRecords().filter(p=>[p.symbol,p.setup,p.notes].join(' ').toUpperCase().includes(query)&&(outcome==='all'||tradeOutcome(p)===outcome)&&(source==='all'||tradeOrigin(p)===source)&&(tf==='all'||p.timeframe===tf));
+}
+function realizedR(p){const risk=((p.fill||p.entry)-p.sl)*p.qty;return risk>0?tradePnl(p)/risk:null;}
+function completedCurveMarkup(rows){rows=rows.filter(p=>p.status!==COMPLETED_PENDING);
+ if(!rows.length)return '<div class="empty">Completed trades will build your performance path here.</div>';
+ let running=0;const values=[0,...rows.map(p=>(running=Math.round((running+tradePnl(p))*100)/100))];
+ let low=Math.min(...values),high=Math.max(...values),padding=(high-low)*0.15||1;low-=padding;high+=padding;
+ const x=i=>78+i/(values.length-1)*625,y=value=>175-(value-low)/(high-low)*145;
+ const step=Math.max(1,Math.ceil(values.length/180)),points=values.map((value,i)=>({value,i})).filter(p=>p.i%step===0||p.i===values.length-1);
+ const line=points.map((p,i)=>`${i?'L':'M'}${x(p.i).toFixed(2)},${y(p.value).toFixed(2)}`).join(' '),last=values.at(-1),color=last>=0?'#39d6ae':'#ff7187';
+ const grid=[high,(high+low)/2,low].map(value=>`<line class="curve-grid" x1="76" y1="${y(value)}" x2="710" y2="${y(value)}"/><text class="curve-label" x="0" y="${y(value)+4}">${escapeHTML(new Intl.NumberFormat('en-IN',{style:'currency',currency:'INR',maximumFractionDigits:0}).format(value))}</text>`).join('');
+ return `<svg viewBox="0 0 720 205" role="img" aria-label="Cumulative realized profit and loss in journal sequence, ending ${escapeHTML(money(last))}"><defs><linearGradient id="pnlShade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${color}" stop-opacity=".18"/><stop offset="1" stop-color="${color}" stop-opacity="0"/></linearGradient></defs>${grid}<path d="${line} L703,184 L78,184 Z" fill="url(#pnlShade)"/><path d="${line}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linejoin="round"/><circle cx="703" cy="${y(last)}" r="4" fill="${color}"/><text x="707" y="${Math.max(14,y(last)-11)}" text-anchor="end" fill="${color}" font-size="12" font-family="Consolas,monospace">${escapeHTML(money(last))}</text><text class="curve-label" x="78" y="202">START</text><text class="curve-label" x="703" y="202" text-anchor="end">${rows.length} CLOSED TRADES</text></svg>`;
+}
+function reportDate(p){const value=p.completedAt||p.closedAt;if(!value||!Number.isFinite(Date.parse(value)))return '';return /^\d{4}-\d{2}-\d{2}$/.test(value)?value:new Date(value).toLocaleDateString('en-CA',{timeZone:'Asia/Kolkata'});}
+function renderCompleted(){
+ const selector=$('completedTimeframe'),previous=selector.value||'all',timeframes=[...new Set(completedRecords().map(p=>p.timeframe).filter(Boolean))];
+ selector.innerHTML='<option value="all">All timeframes</option>'+timeframes.map(tf=>`<option value="${escapeHTML(tf)}">${escapeHTML(tf)}</option>`).join('');selector.value=timeframes.includes(previous)?previous:'all';
+ const rows=completedTradesView(),summary=performanceSummary(rows),factor=summary.loss? (summary.profit/summary.loss).toFixed(2):summary.wins?'No losses':'--';
+ $('completedStats').innerHTML=[['Filtered net P/L',money(summary.net),`${summary.total} trades / ${summary.winRate.toFixed(1)}% win rate`,summary.net<0?'red':'green'],['Profit factor',factor,'Total gains divided by total losses','blue'],['Average winner',money(summary.wins?summary.profit/summary.wins:0),`${summary.wins} profitable trades`,'green'],['Average loser',money(summary.losses?summary.loss/summary.losses:0),`${summary.losses} losing trades`,'red']].map(([label,value,detail,color])=>`<div class="stat"><small>${label}</small><strong class="${color}">${value}</strong><span>${detail}</span></div>`).join('');
+ $('completedScope').textContent=`Showing ${rows.length} of ${completedRecords().length} completed / ${rows.filter(p=>p.status===COMPLETED_PENDING).length} need execution details`;
+ $('completedCurve').innerHTML=completedCurveMarkup(rows);
+ const period=$('reportPeriod').value||'month',dated=completedRecords().filter(p=>p.status!=='Completed - details pending'&&reportDate(p));
+ const periodKeys=[...new Set(dated.map(p=>period==='year'?reportDate(p).slice(0,4):reportDate(p).slice(0,7)))].sort();
+ $('periodBreakdown').innerHTML=(period==='all'?periodKeys:periodKeys.slice(-12)).map(key=>{const trades=dated.filter(p=>(period==='year'?reportDate(p).slice(0,4):reportDate(p).slice(0,7))===key),stats=performanceSummary(trades);return `<tr><td>${escapeHTML(key)}</td><td>${stats.total}</td><td>${stats.winRate.toFixed(1)}%</td><td>${money(stats.profit)}</td><td class="red">${money(stats.loss)}</td><td class="${stats.net<0?'red':'green'}">${money(stats.net)}</td></tr>`;}).join('')||'<tr><td colspan="6">Add actual entry and completed dates to see period reports.</td></tr>';
+ const total=summary.total||1;
+ $('completedDistribution').innerHTML=`<div class="distribution-bar"><span style="width:${summary.wins/total*100}%;background:var(--green)"></span><span style="width:${summary.losses/total*100}%;background:var(--red)"></span><span style="width:${summary.breakeven/total*100}%;background:#7d99c0"></span></div><div class="distribution-labels"><span class="green">${summary.wins} winners</span><span class="red">${summary.losses} losers</span><span>${summary.breakeven} breakeven</span><span>${summary.winRate.toFixed(1)}% win rate</span></div>`;
+ const grouped=new Map();for(const p of rows.filter(p=>p.status!==COMPLETED_PENDING)){const key=p.setup||'Unspecified';if(!grouped.has(key))grouped.set(key,[]);grouped.get(key).push(p);}
+ const groups=[...grouped].map(([setup,trades])=>({setup,...performanceSummary(trades)})).sort((a,b)=>b.net-a.net),max=Math.max(1,...groups.map(g=>Math.abs(g.net)));
+ $('setupBreakdown').innerHTML=groups.map(g=>`<div class="setup-result"><div class="row"><b>${escapeHTML(g.setup)}</b><span class="${g.net<0?'red':'green'}">${money(g.net)}</span></div><div class="row"><small>${g.total} trades</small><small>${g.winRate.toFixed(1)}% win rate</small></div><div class="setup-meter ${g.net<0?'negative':''}"><span style="width:${Math.abs(g.net)/max*100}%"></span></div></div>`).join('')||'<p class="empty">No completed trades match these filters.</p>';
+ $('journal').innerHTML=rows.map(p=>{const outcome=tradeOutcome(p),r=realizedR(p),pnl=tradePnl(p),execution=p.executedAt&&Number.isFinite(Date.parse(p.executedAt))?(p.executedDateOnly?new Date(p.executedAt).toLocaleDateString('en-IN',{timeZone:'Asia/Kolkata'}):new Date(p.executedAt).toLocaleString('en-IN',{timeZone:'Asia/Kolkata'})):'Not recorded',date=p.closedAt&&Number.isFinite(Date.parse(p.closedAt))?(p.closedDateOnly?new Date(p.completedAt||p.closedAt).toLocaleDateString('en-IN',{timeZone:'Asia/Kolkata'}):new Date(p.completedAt||p.closedAt).toLocaleString('en-IN',{timeZone:'Asia/Kolkata'})):'Not recorded';return `<tr><td><span class="stock-main">${escapeHTML(p.symbol)}</span><span class="stock-sub">${escapeHTML(p.setup||'No setup')}</span></td><td>${escapeHTML(p.timeframe)}</td><td>${p.status===COMPLETED_PENDING?'Not recorded':p.qty}</td><td>${money(p.fill||p.entry)}${p.status===COMPLETED_PENDING?' (planned)':''}</td><td>${p.exit>0?money(p.exit):'Not recorded'}</td><td>${money(p.brokerage||0)}</td><td title="${escapeHTML(chargeText(p))}">${p.totalCharges!==null?money(p.totalCharges):'Not recorded'}<small class="stock-sub">${escapeHTML(p.charges?.mode||'External fees pending')}</small></td><td class="${pnl<0?'red':pnl>0?'green':''}"><b>${p.status===COMPLETED_PENDING?'Needs details':money(pnl)}</b></td><td>${r!==null?r.toFixed(2)+'R':'--'}</td><td><span class="outcome-badge ${outcome}">${outcome==='win'?'WIN':outcome==='loss'?'LOSS':outcome==='pending'?'NEEDS DETAILS':'BREAKEVEN'}</span></td><td>${tradeOrigin(p)}</td><td>${escapeHTML(execution)}</td><td>${escapeHTML(date)}</td><td>${escapeHTML(p.notes||'--')}</td><td>${canRecordSale(p)?`<button data-action="recordSale" data-id="${escapeHTML(p.id)}">${p.status===COMPLETED_PENDING?'Add sale details':'Edit sale'}</button>`:''}<button data-action="deleteTrade" data-id="${escapeHTML(p.id)}">Delete</button></td></tr>`;}).join('')||'<tr><td colspan="15" class="empty">No completed trades match your filters.</td></tr>';
+}
+function render(){
+ $('knownSymbols').innerHTML=[...new Set([...stockSymbols,...state.plans.map(p=>p.symbol)].map(symbol=>String(symbol||'').trim().toUpperCase()).filter(Boolean))].sort().map(symbol=>`<option value="${escapeHTML(symbol)}"></option>`).join('');
+ updatePlanSortHeaders();
+ state.plans.forEach(p=>TradeMath.derive(p,state.settings));
+ const performance=performanceSummary(state.plans);
+ $('performanceStats').innerHTML=[
+  ['Completed trades',String(completedRecords().length),`${performance.total} with P/L / ${completedRecords().length-performance.total} need details`,''],
+  ['Win rate',performance.winRate.toFixed(1)+'%','Winning trades / all closed trades','blue'],
+  ['Total profit',money(performance.profit),'Sum of profitable closed trades','green'],
+  ['Total loss',money(performance.loss),'Sum of losing closed trades','red'],
+  ['Net realized P&L',money(performance.net),'After estimated / actual recorded charges',performance.net<0?'red':performance.net>0?'green':'']
+ ].map(([label,value,detail,color])=>`<div class="stat"><small>${label}</small><strong class="${color}">${value}</strong><span>${detail}</span></div>`).join('');
+ const realized=performance.net, used=positions().reduce((s,p)=>s+p.qty*(p.fill||p.entry),0);
+ const openRisk=positions().reduce((s,p)=>s+p.qty*((p.fill||p.entry)-p.sl),0);
+ $('stats').innerHTML=[['Trading capital',money(state.settings.capital),`${state.settings.risk}% risk Â· ${money(state.settings.capital*state.settings.risk/100)} / trade`],['Available planning capital',money(state.settings.capital-used),'After armed & holding reservations'],['Open / reserved risk',money(openRisk),`${(openRisk/state.settings.capital*100).toFixed(2)}% of capital Â· ${state.settings.portfolioRisk}% limit`],['Recorded realized P&L',money(realized),`${closed().length} closed trades Â· after estimated / recorded charges`]].map(([label,val,detail])=>`<div class="stat"><small>${label}</small><strong>${val}</strong><span>${detail}</span></div>`).join('');
+ $('pause').textContent=state.paused?'Resume new entries':'Pause new entries';$('pause').className=state.paused?'danger':'';$('zoneLabel').textContent=state.settings.zone;
+ const query=$('search').value.toUpperCase(),filter=$('filter').value;
+ const radarCandidates=state.plans.filter(p=>!['Target hit','SL hit','Closed',COMPLETED_PENDING].includes(p.status)&&p.symbol.includes(query)&&['Watching','Armed','Live armed','Live entry pending','Live submitting'].includes(p.status)&&!(p.liveFilledQty>0)&&p.holdingSource!=='Dhan portfolio');
+ const radarPlans=filter==='Holding'?ongoingTrades().filter(p=>!['Closed','Target hit','SL hit',COMPLETED_PENDING].includes(p.status)&&(p.accountOnly||p.holdingSource==='Dhan portfolio'||p.liveFilledQty>0||['Imported holding','Holding','Live partial fill','Live holding','Live exit pending','Live action required'].includes(p.status))&&p.symbol.includes(query)):radarCandidates.filter(p=>filter==='all'||category(p)===filter);
+ const plans=radarPlans.filter(p=>filter==='all'||filter==='Holding'||category(p)===filter).sort((a,b)=>distance(a)-distance(b));
+ renderTerminal(plans);
+ $('plans').innerHTML=activePlansView().map(p=>`<tr><td>${escapeHTML(p.setup||'')}</td><td>${escapeHTML(p.timeframe)}</td><td>${p.holdingSource==='Dhan portfolio'?`<button data-action="refreshHolding" data-id="${escapeHTML(p.id)}">Refresh Dhan holding</button>`:p.portfolioLinkAvailable?`<button data-action="linkHolding" data-id="${escapeHTML(p.id)}">Link Dhan holding</button>`:''}${canEditHolding(p)?`<button data-action="editHolding" data-id="${escapeHTML(p.id)}">Edit holding</button>`:''}${canRecordSale(p)?`<button data-action="recordSale" data-id="${escapeHTML(p.id)}">Record sale</button>`:''}${p.status==='Imported holding'&&p.holdingBroker!=='Zerodha'?`<button data-action="syncSale" data-id="${escapeHTML(p.id)}">Sync Dhan exit</button>`:''}${p.status==='Watching'?`<button data-action="edit" data-id="${escapeHTML(p.id)}">Edit</button><button data-action="manualExecution" data-id="${escapeHTML(p.id)}">Record execution</button>`:''}${p.status==='Watching'?` <button data-action="delete" data-id="${escapeHTML(p.id)}">Delete</button>`:''} ${planEnableButton(p)}</td><td>${escapeHTML(p.symbol)}</td><td>BUY</td><td>${money(p.entry)}</td><td class="red">${money(p.sl)}</td><td class="green">${money(p.target)}</td><td>1:${((p.target-p.entry)/(p.entry-p.sl)).toFixed(2)}</td><td>${money(p.brokerage||0)}</td><td title="${p.status==='Watching'?'Calculated from capital and risk':'Actual recorded quantity; live partial rows show filled / planned'}">${p.holdingDetailsPending?'Needs details':p.status==='Live partial fill'?p.liveFilledQty+' / '+p.qty:p.qty}${p.holdingSource==='Dhan portfolio'||p.accountOnly?'<small class="stock-sub">Dhan account quantity</small>':''}</td><td>${p.cmp>0?money(p.cmp):'Awaiting Dhan'}</td><td>${p.cmp>0?money(p.cmp-p.entry):''}</td><td>${Number.isFinite(distance(p))?((p.cmp-p.entry)/p.entry*100).toFixed(2)+'%':''}</td><td title="${escapeHTML(p.exitSource||'No executed exit')}">${p.exit?money(p.exit):''}</td><td>${money(p.requiredMargin)}</td><td>${p.pnl!==null?money(p.pnl):''}${p.pnl!==null&&!p.exit?' (open)':''}</td><td>${escapeHTML(p.notes||'')}</td><td>${escapeHTML(p.holdingSource==='Dhan portfolio'?'Holding':p.status)}${p.holdingBroker?' / '+escapeHTML(p.holdingBroker):''}${p.portfolioSyncNote?'<small class="stock-sub">'+escapeHTML(p.portfolioSyncNote)+'</small>':''}</td></tr>`).join('');
+ const open=openPlans(),holding=open.filter(p=>/holding|partial fill/i.test(p.status)),armed=open.filter(p=>/armed|pending|submitting/i.test(p.status));
+ $('plansTabCount').textContent=String(waitingPlans().length);$('completedTabCount').textContent=String(completedRecords().length);
+ $('watchingCount').textContent=String(open.filter(p=>p.status==='Watching').length);$('armedCount').textContent=String(armed.length);$('holdingCount').textContent=String(holding.length);
+ $('activePlansLabel').textContent=`${activePlansView().length} shown / ${waitingPlans().length} waiting setups`;
+ if(!activePlansView().length)$('plans').innerHTML='<tr><td colspan="19" class="empty">No waiting setups match your filters.</td></tr>';
+ $('journalSummary').innerHTML=`<div class="result"><div class="row"><span>Watching setups</span><b>${waitingPlans().filter(p=>p.status==='Watching').length}</b></div><div class="row"><span>Armed / entry pending</span><b>${waitingPlans().filter(p=>p.status!=='Watching').length}</b></div><p class="hint">Executed trades move to Holdings. Recorded sales move to Completed Trades. Dhan holdings are fetched automatically; Zerodha sales are entered manually.</p></div>`;
+ renderOngoing();
+ renderCompleted();
+}
+function updateCalculation(){
+ $('plannerDefaults').textContent=`Capital ${money(state.settings.capital)} / Risk ${state.settings.risk}% (${money(state.settings.capital*state.settings.risk/100)} per trade) / Default R:R 1:${state.settings.rr}`;
+ const e=+$('entry').value,s=+$('sl').value;targetManual=$('targetMode').value==='manual';
+ if(!targetManual)$('target').value=e>s&&s>0?(e+(e-s)*state.settings.rr).toFixed(2):'';
+ const automatic=calc(e,s,+$('target').value),manualQty=$('qtyMode').value==='manual',manualFee=$('brokerageMode').value==='manual';
+ if(!manualQty)$('planQty').value=automatic.qty;
+ if(!manualFee)$('planBrokerage').value='0.00';
+ $('target').readOnly=!targetManual;$('planQty').readOnly=!manualQty;$('planBrokerage').readOnly=!manualFee;
+ const qty=+$('planQty').value,profit=qty*(+$('target').value-e),risk=qty*(e-s),cost=qty*e;
+ $('calculation').innerHTML=`<div class="row"><span>Quantity / ${manualQty?'Manual':'Auto'}</span><strong>${qty} shares</strong></div><div class="row"><span>Planned price risk</span><b class="red">${money(risk||0)}</b></div><div class="row"><span>Potential profit before charges</span><b class="green">${money(profit||0)}</b></div><div class="row"><span>Actual risk / reward</span><b>1:${Number.isFinite(automatic.rr)?automatic.rr.toFixed(2):'--'}</b></div><div class="row"><span>Capital required</span><b>${money(cost||0)}</b></div><div class="row"><span>Suggested automatic quantity</span><b>${automatic.qty}</b></div>`;
+}
+for(const id of ['entry','sl','target','planQty','planBrokerage'])$(id).addEventListener('input',()=>{if(id==='target')$('targetMode').value='manual';updateCalculation();});
+for(const id of ['targetMode','qtyMode','brokerageMode'])$(id).onchange=updateCalculation;
+$('resetTarget').onclick=()=>{$('targetMode').value='auto';updateCalculation();};
+$('resetAllAuto').onclick=()=>{for(const id of ['targetMode','qtyMode','brokerageMode'])$(id).value='auto';updateCalculation();};
+function clearForm(){editing=null;targetManual=false;$('planform').reset();for(const id of ['targetMode','qtyMode','brokerageMode'])$(id).value='auto';$('formTitle').textContent='Create a trade plan';updateCalculation();}
+$('cancelEdit').onclick=clearForm;$('newtrade').onclick=()=>{clearForm();page('planner');};
+$('planform').onsubmit=e=>{e.preventDefault();const old=state.plans.find(p=>p.id===editing);if(old&&old.status!=='Watching')return toast('Disarm first. Holding and closed trades cannot be edited in this preview.');const p={id:editing||uid(),setup:$('setup').value.trim(),symbol:$('symbol').value.trim().toUpperCase(),timeframe:$('timeframe').value,entry:+$('entry').value,sl:+$('sl').value,target:+$('target').value,cmp:old?.cmpSource==='Dhan'?old.cmp:null,cmpSource:old?.cmpSource||'Awaiting Dhan',targetMode:$('targetMode').value==='manual'?'manual':'auto',qtyMode:$('qtyMode').value==='manual'?'manual':'auto',brokerageMode:$('brokerageMode').value==='manual'?'manual':'auto',manualBrokerage:+$('planBrokerage').value,expiry:$('expiry').value,notes:$('notes').value,status:'Watching'};p.qty=p.qtyMode==='manual'?+$('planQty').value:calc(p.entry,p.sl,p.target).qty;TradeMath.derive(p,state.settings);const error=valid(p);if(error)return toast(error);if(state.plans.some(x=>x.id!==p.id&&TradeImport.key(x)===TradeImport.key(p)))return toast('This exact setup already exists. Edit it or use a different entry/setup.');if(old)Object.assign(old,p);else state.plans.push(p);clearForm();save();toast('Trade plan saved as Watching. Review and arm separately before execution.');};
+function evaluate(p){if(p.status==='Armed'&&!state.paused&&p.enabled!==false&&!togglingPlans.has(p.id)){if(expired(p)){p.status='Watching';toast(`${p.symbol}: plan expired; disarmed.`);return;}if(p.cmp>=p.entry){const gap=(p.cmp/p.entry-1)*100;if(gap>state.settings.gap||p.cmp>=p.target){p.status='Watching';toast(`${p.symbol}: entry skipped beyond gap allowance.`);return;}const others=positions().filter(x=>x.id!==p.id),cost=others.reduce((s,x)=>s+x.qty*(x.fill||x.entry),0),risk=others.reduce((s,x)=>s+x.qty*((x.fill||x.entry)-x.sl),0);if(cost+p.qty*p.cmp>state.settings.capital||risk+p.qty*(p.cmp-p.sl)>state.settings.capital*state.settings.portfolioRisk/100){p.status='Watching';toast(`${p.symbol}: fill blocked by capital or risk limit.`);return;}p.status='Holding';p.fill=p.cmp;p.filledAt=new Date().toISOString();toast(`${p.symbol}: simulated buy filled at ${money(p.fill)}.`);}}if(p.status==='Holding'&&(p.cmp<=p.sl||p.cmp>=p.target)){p.status=p.cmp<=p.sl?'SL hit':'Target hit';p.exit=p.cmp;p.exitSource='Paper';p.closedAt=new Date().toISOString();toast(`${p.symbol}: simulated ${p.status.toLowerCase()} at ${money(p.exit)}.`);}}
+document.body.addEventListener('keydown',event=>{if(['Enter',' '].includes(event.key)&&event.target.matches?.('tr[data-action="selectStock"]')){event.preventDefault();selectedTradeId=event.target.dataset.id;render();}});
+document.body.addEventListener('click',event=>{const b=event.target.closest('[data-action]');if(!b)return;if(b.dataset.action==='focusHolding'){$('ongoingSearch').value=b.dataset.symbol||'';$('ongoingBroker').value='Dhan';page('live');render();return;}if(b.dataset.action==='clearOngoingFilters'){$('ongoingSearch').value='';$('ongoingBroker').value='all';render();return;}if(b.dataset.action==='refreshPortfolio'){globalThis.TradeDeskPortfolio?.refresh();return;}const p=state.plans.find(p=>p.id===b.dataset.id)||ongoingTrades().find(p=>p.id===b.dataset.id);if(!p)return;
+ if(b.dataset.action==='fetchHoldingDate'){const button=b,symbol=String(b.dataset.symbol||p.symbol||'').toUpperCase(),quantity=Number(b.dataset.quantity||p.qty),dateKey=b.dataset.dateKey||`${latestPortfolio?.clientId||''}:${b.dataset.security||p.securityId||symbol}`;if(!Number.isSafeInteger(quantity)||quantity<=0)return toast('Dhan quantity is unavailable; sync holdings and retry.');if(dhanDateRequests.has(dateKey))return toast(`${symbol}: Dhan date lookup is already running.`);dhanDateRequests.add(dateKey);button.disabled=true;dhanHoldingEntryDate(symbol,quantity).then(entry=>{if(p.accountOnly){state.holdingDates[dateKey]={executedAt:entry,source:'Dhan trade history',checkedAt:new Date().toISOString()};}else Object.assign(p,{executedAt:entry,executedDateOnly:true,tradeDatesSource:'Dhan trade history',journalEdited:true});state.holdingDateChecks[dateKey]={attemptedAt:new Date().toISOString(),error:'',version:2};save();toast(`${symbol}: Dhan entry date saved as ${entry}.`);}).catch(error=>{state.holdingDateChecks[dateKey]={attemptedAt:new Date().toISOString(),error:error.message,version:2};save();toast(error.message);}).finally(()=>{dhanDateRequests.delete(dateKey);button.disabled=false;});return;}
+ if(b.dataset.action==='manualExecution'){openManualExecution(p);return;}
+ if(b.dataset.action==='chartStock'){ selectedTradeId=p.id;radarMode='watchlist';$('radarView').value='watchlist';render();return;}
+ if(b.dataset.action==='selectStock'){selectedTradeId=p.id;render();return;}
+ if(b.dataset.action==='toggleEnabled'){togglePlanEnabled(p);return;}
+ if(b.dataset.action==='editHolding'){openHoldingEditor(p||ongoingTrades().find(x=>x.id===b.dataset.id));return;}
+ if(b.dataset.action==='recordSale'){openSaleEditor(p);return;}
+ if(b.dataset.action==='deleteTrade'){if(p.accountOnly)return toast('This row is the live Dhan account holding; it cannot be deleted here. Delete or unlink its matching local plan instead.');const brokerRecord=!!(p.holdingSource==='Dhan portfolio'||p.holdingBroker==='Dhan'||p.liveState&&p.liveState!=='DISARMED');const message=brokerRecord?('Remove the '+p.symbol+' plan from this app? The actual Dhan holding will remain visible after sync. This does not sell shares or cancel Dhan orders.'):('Delete '+p.symbol+' from this app? This removes its local holding / completed journal record and cannot be undone.');if(!window.confirm(message))return;state.plans=state.plans.filter(x=>x.id!==p.id);save();toast(brokerRecord?p.symbol+': local plan removed; Dhan holding remains.':p.symbol+': removed from this app.');return;}
+ if(b.dataset.action==='edit'){if(p.status!=='Watching')return toast('Disarm before editing. Holding / closed plans are locked in this preview.');editing=p.id;targetManual=p.targetMode!=='auto';$('targetMode').value=targetManual?'manual':'auto';$('qtyMode').value=p.qtyMode==='manual'?'manual':'auto';$('brokerageMode').value=p.brokerageMode==='manual'?'manual':'auto';$('planQty').value=p.qty;$('planBrokerage').value=p.manualBrokerage??p.brokerage??0;for(const key of ['setup','symbol','entry','sl','target','expiry','notes'])$(key).value=p[key]??'';if(![...$('timeframe').options].some(o=>o.value===p.timeframe))$('timeframe').add(new Option(p.timeframe,p.timeframe));$('timeframe').value=p.timeframe;$('formTitle').textContent=`Edit ${p.symbol}`;updateCalculation();page('planner');window.scrollTo(0,0);}
+ if(b.dataset.action==='delete'){state.plans=state.plans.filter(x=>x.id!==p.id);save();}
+ if(b.dataset.action==='disarm'){p.status='Watching';save();}
+ if(b.dataset.action==='syncSale'){syncDhanSale(p);}
+ if(b.dataset.action==='linkHolding'){TradeDeskData.linkPortfolioHolding(p.id);return;}
+ if(b.dataset.action==='refreshHolding'){globalThis.TradeDeskPortfolio?.refresh();return;}
+ if(b.dataset.action==='arm'){if(p.qty>calc(p.entry,p.sl,p.target).qty)return toast('Paper execution quantity exceeds the current capital/risk limit. Your plan is still saved.');if(p.enabled===false)return toast('This trade is disabled. Enable it before arming.');const validation=valid(p);if(validation)return toast(validation);if(!(p.cmp>0)||p.cmpSource!=='Dhan')return toast('Connect Dhan and refresh CMP before arming a paper trade.');if(p.liveState&&p.liveState!=='DISARMED')return toast('This plan already has a live record. Review Holdings.');if(state.paused)return toast('Resume new entries before arming.');if(expired(p))return toast('Update the expired plan before arming.');const others=positions();if(others.reduce((s,x)=>s+x.qty*(x.fill||x.entry),0)+p.qty*p.entry>state.settings.capital)return toast('Insufficient unreserved planning capital.');if(others.reduce((s,x)=>s+x.qty*((x.fill||x.entry)-x.sl),0)+p.qty*(p.entry-p.sl)>state.settings.capital*state.settings.portfolioRisk/100)return toast('Total portfolio risk limit exceeded.');p.status='Armed';evaluate(p);save();}
+});
+$('pause').onclick=async()=>{state.paused=!state.paused;save();if(state.paused){const paused=await globalThis.LiveDesk?.pause();toast(paused===false?'Paper entries paused, but live pause could not be confirmed. Check Holdings and Dhan.':'New entries paused. Existing broker orders and exit legs remain active.');}else toast('Paper entries resumed. Enable live monitoring separately in Holdings.');};
+$('search').oninput=render;$('filter').onchange=render;
+for(const key of Object.keys(defaultSettings))$(key).value=state.settings[key];
+$('settingsForm').onsubmit=e=>{e.preventDefault();const next=Object.fromEntries(Object.keys(defaultSettings).map(k=>[k,+$(k).value]));const reserved=positions();if(reserved.reduce((s,p)=>s+p.qty*(p.fill||p.entry),0)>next.capital||reserved.reduce((s,p)=>s+p.qty*((p.fill||p.entry)-p.sl),0)>next.capital*next.portfolioRisk/100)return toast('Defaults conflict with current reservations. Disarm plans or retain higher limits.');state.settings=next;save();updateCalculation();toast('Defaults saved. Existing quantities were preserved.');};
+$('clearDemo').onclick=()=>{state.plans=state.plans.filter(p=>!p.sample||p.status!=='Watching');save();toast('Unused sample plans removed.');};
+function download(name,text,type='text/csv'){const u=URL.createObjectURL(new Blob([text],{type}));const a=document.createElement('a');a.href=u;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(u),1000);}
+const keys=Object.keys(TradeImport.fields), columns=keys.map(k=>TradeImport.labels[k]);
+function allPlansExportRows(plans=state.plans){return [[...trackerColumns,'Status','CMP Source','Sale Source','Target Mode','Quantity Mode','Brokerage Mode','Manual Brokerage','Enabled','Total Charges','Charges Basis','Actual Total Charges','Holding Broker','Entry Fill','Executed At','Completed At'],...plans.map(p=>[p.setup,p.timeframe,p.symbol,'BUY',p.entry,p.sl,p.target,(p.target-p.entry)/(p.entry-p.sl),p.brokerage||0,p.qty,p.cmp,p.cmp>0?p.cmp-p.entry:'',p.cmp>0?(p.cmp-p.entry)/p.entry*100:'',p.exit??'',p.requiredMargin,p.pnl??'',p.notes,p.id,p.status,p.cmpSource,p.exitSource,p.targetMode||'auto',p.qtyMode||'auto',p.brokerageMode||'auto',p.manualBrokerage??'',p.enabled===false?'No':'Yes',p.totalCharges??'',p.charges?.mode||'',p.actualTotalCharges??'',p.holdingBroker||'',p.fill??'',p.executedAt||'',p.completedAt||p.closedAt||''])];}
+$('downloadAllPlans').onclick=()=>download('Deep-Trading-Desk-trade-plans-'+localDate()+'.csv','\ufeff'+csvExport(allPlansExportRows(activePlansView())));
+
+
+function completedExportRows(){const rows=completedTradesView(),base=allPlansExportRows(rows);return [[...base[0],'Outcome','Realized R'],...rows.map((p,i)=>[...base[i+1],tradeOutcome(p),realizedR(p)??''])];}
+$('downloadCompleted').onclick=()=>download('Deep-Trading-Desk-completed-'+localDate()+'.csv','\ufeff'+csvExport(completedExportRows()));
+for(const id of ['plansSearch','completedSearch','ongoingSearch'])$(id).oninput=render;
+for(const id of ['plansStatus','plansSort','ongoingBroker','completedOutcome','completedSource','completedTimeframe','reportPeriod'])$(id).onchange=render;
+
+function csvValue(v){return '"'+String(v??'').replace(/"/g,'""')+'"';}
+function csvExport(rows){return rows.map(row=>row.map(csvValue).join(',')).join('\r\n');}
+const trackerColumns=['TRADE SETUP','EXECUTION TF','STOCK/SCRIPT','BUY/SELL','ENTRY','STOPLOSS','TARGET','R:R','Brokerage','QTY','CMP','Diff','DIFF in %','SALE PRICE','Required Margin','P/L','Note/Remark','Trade ID'];
+$('template').onclick=()=>download('Tracker-4.0-template.csv',csvExport([trackerColumns,['QIT','W','RELIANCE','BUY',1400,1370,1460,2,0,0,1392,'','','','','','Delivery setup','PLAN-001']]));
+$('backup').onclick=()=>download('trade-plans.csv',csvExport(allPlansExportRows()));
+function invalidateImport(){staged=[];$('commit').disabled=true;$('importSummary').textContent='';$('importRows').innerHTML='';}
+function mapping(){invalidateImport();const rows=workbook[$('sheet').value]||[],headers=rows[+$('headerRow').value-1]||[];const detected=TradeImport.detect([headers]);$('mapping').innerHTML=keys.map((key,i)=>{const match=detected.map[key];return `<label>${columns[i]}${['symbol','entry','sl'].includes(key)?' *':''}<select data-map="${key}"><option value="-1">${key==='target'?'Calculate default':key==='cmp'?'Unavailable':key==='timeframe'?'Daily':'Not mapped'}</option>${headers.map((h,j)=>`<option value="${j}" ${j===match?'selected':''}>${j+1}: ${escapeHTML(h||'(empty)')}</option>`).join('')}</select></label>`;}).join('');}
+function selectSheet(){const found=TradeImport.detect(workbook[$('sheet').value]||[]);$('headerRow').value=found.row+1;mapping();}
+$('upload').onchange=async()=>{const file=$('upload').files[0];if(!file)return;invalidateImport();$('importArea').classList.add('hidden');try{if(file.size>5000000)throw Error('Choose a file smaller than 5 MB.');const r=await fetch('/api/import',{method:'POST',body:file});const result=await r.json();if(!r.ok)throw Error(result.error);workbook=result.sheets;$('sheet').innerHTML=Object.keys(workbook).map(s=>`<option>${escapeHTML(s)}</option>`).join('');const preferred=Object.keys(workbook).find(s=>s==='Tracker 4.0')||Object.keys(workbook).find(s=>TradeImport.detect(workbook[s]).score===3);if(preferred)$('sheet').value=preferred;$('importArea').classList.remove('hidden');selectSheet();}catch(e){toast(`Import failed: ${e.message}. Run the Python server to import Excel.`);}};
+$('sheet').onchange=selectSheet;$('headerRow').onchange=mapping;$('mapping').onchange=invalidateImport;
+function naturalKey(p){return TradeImport.key(p);}
+$('review').onclick=()=>{invalidateImport();const mappingValues=Object.fromEntries([...document.querySelectorAll('[data-map]')].map(s=>[s.dataset.map,+s.value]));if(['symbol','entry','sl'].some(k=>mappingValues[k]<0))return toast('Map Symbol, Entry and SL before reviewing.');staged=TradeImport.review(workbook[$('sheet').value]||[],+$('headerRow').value-1,mappingValues,state);
+ $('importRows').innerHTML=staged.map(r=>`<tr><td>${r.row}</td><td>${escapeHTML(r.p.symbol)}</td><td class="${r.action==='Skip'?'red':'green'}">${r.action}</td><td>${escapeHTML(r.detail)}</td></tr>`).join('');const validRows=staged.filter(r=>['Add','Update'].includes(r.action));$('importSummary').textContent=`${validRows.length} additions / updates / ${staged.filter(r=>r.action==='Unchanged').length} unchanged / ${staged.filter(r=>r.action==='Skip').length} skipped. Review before confirming.`;$('commit').disabled=!validRows.length;};
+function commitRows(rows){let count=0;for(const r of rows){if(!['Add','Update'].includes(r.action))continue;const existing=state.plans.find(p=>p.id===r.p.id);if(existing&&['Armed','Holding'].includes(existing.status))continue;if(existing)Object.assign(existing,r.p);else state.plans.push(r.p);count++;}return count;}
+$('commit').onclick=()=>{const count=commitRows(staged);invalidateImport();save();toast(`${count} records imported. No trades were armed or submitted.`);};
+async function syncDhanSale(p){
+ if(p.holdingBroker==='Zerodha')return toast('Record this Zerodha sale manually using Record sale.');if(p.status!=='Imported holding')return toast('Only recorded real holdings can sync a Dhan exit.');
+ const orderId=prompt('Enter the executed Dhan delivery SELL order ID for '+p.symbol+'. This only reads fills; no order is placed.');if(!orderId)return;
+ if(state.plans.some(x=>x.id!==p.id&&x.exitOrderId===orderId.trim()))return toast('That sell order is already linked to another plan.');
+ try{const r=await fetch('/api/dhan/sale',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:p.symbol,quantity:p.qty,orderId:orderId.trim()})});const data=await r.json();if(!r.ok)throw Error(data.error||'Unable to read sale fills.');if(p.status!=='Imported holding')return;const completedAt=data.lastTradeAt||new Date().toISOString();Object.assign(p,{exit:data.salePrice,exitSource:data.source,exitOrderId:data.orderId,status:'Closed',closedAt:completedAt,completedAt,closedDateOnly:false,tradeDatesSource:'Dhan trade history'});save();toast('Verified Dhan sell fills and completion date applied. P&L recalculated.');}catch(error){toast(error.message);}
+}
+function syncPortfolioSnapshot(data,chosenId=null){
+ if(!data||typeof data.clientId!=='string'||!Array.isArray(data.holdings)||!Array.isArray(data.positions)||!Number.isFinite(Date.parse(data.checkedAt)))return false;
+ if(chosenId&&Date.now()-portfolioReceivedAt>120000){globalThis.TradeDeskPortfolio?.refresh();toast('Refreshing account data. Choose the holding link again after the refresh.');return false;}
+ latestPortfolio=data;portfolioSyncError='';portfolioAvailable=true;if(!chosenId)portfolioReceivedAt=Date.now();let changed=false;
+ const eligible=p=>['Watching','Armed','Imported holding'].includes(p.status)&&p.holdingBroker!=='Zerodha'&&(!p.holdingAccount||p.holdingAccount===data.clientId)&&(!p.liveState||p.liveState==='DISARMED')&&p.exitSource!=='Dhan execution';
+ const symbols=new Set([...data.holdings,...data.positions].map(r=>r.symbol));
+ const assign=(p,values)=>{for(const [key,value] of Object.entries(values)){if(p[key]!==value){p[key]=value;changed=true;}}};
+ for(const p of state.plans.filter(p=>p.holdingSource==='Dhan portfolio'&&p.holdingAccount&&p.holdingAccount!==data.clientId))assign(p,{holdingVerified:false,portfolioSyncNote:'This holding belongs to another Dhan account; not changed.'});
+ for(const symbol of symbols){
+  const plans=state.plans.filter(p=>p.symbol===symbol&&eligible(p));if(!plans.length)continue;
+  if(state.plans.some(p=>p.symbol===symbol&&p.liveState&&p.liveState!=='DISARMED'&&!['CLOSED','CANCELLED','REJECTED','EXPIRED'].includes(p.liveState)))continue;
+  const held=data.holdings.filter(r=>r.symbol===symbol),today=data.positions.filter(r=>r.symbol===symbol);
+  const rows=held.length?held:today;
+  const row=rows.length===1?rows[0]:null;
+  const validRow=row&&Number.isSafeInteger(row.quantity)&&row.quantity>0&&Number.isFinite(row.averagePrice)&&row.averagePrice>0&&!(held.length&&today.length);
+  if(!validRow){for(const p of plans)assign(p,{portfolioSyncNote:'Overlapping or incomplete Dhan quantities; review account before linking.',portfolioLinkAvailable:false,holdingVerified:false});continue;}
+  const linked=plans.filter(p=>p.holdingSource==='Dhan portfolio'),chosen=chosenId?plans.find(p=>p.id===chosenId):null;
+  const target=chosen&&linked.every(p=>p.id===chosenId)?chosen:linked.length===1?linked[0]:linked.length===0&&plans.length===1?plans[0]:null;
+  for(const p of plans){
+   if(p!==target){assign(p,{portfolioSyncNote:target?'Dhan holding linked to another setup.':`Dhan holds ${row.quantity} shares. Choose which setup represents this holding.`,portfolioLinkAvailable:!target});continue;}
+   if(p.securityId&&String(p.securityId)!==String(row.securityId)){assign(p,{portfolioSyncNote:'Dhan instrument differs from this plan; review symbol mapping.',portfolioLinkAvailable:false,holdingVerified:false});continue;}
+   if(!p.holdingSource)assign(p,{plannedQty:p.qty});
+   assign(p,{qty:row.quantity,sourceQty:row.quantity,fill:row.averagePrice,qtyMode:'manual',status:'Imported holding',holdingSource:'Dhan portfolio',holdingBroker:'Dhan',holdingAccount:data.clientId,holdingCheckedAt:data.checkedAt,holdingVerified:true,securityId:String(row.securityId),holdingDetailsPending:false,journalEdited:true,portfolioSyncNote:'Quantity and average buy price verified from Dhan.',portfolioLinkAvailable:false});
+  }
+ }
+ for(const p of state.plans.filter(p=>eligible(p)&&p.holdingSource==='Dhan portfolio'&&!symbols.has(p.symbol)))assign(p,{holdingVerified:false,portfolioSyncNote:'Absent from current Dhan snapshot. Review the exit; no sale is assumed.',portfolioLinkAvailable:false});
+ if(changed)save();else render();queueDhanHoldingDateLookups(data);return changed;
+}
+globalThis.TradeDeskData={
+ applyPortfolioSnapshot:syncPortfolioSnapshot,
+ linkPortfolioHolding(id){if(!latestPortfolio)return toast('Refresh Dhan holdings first.');if(syncPortfolioSnapshot(latestPortfolio,id)){page('live');toast('Dhan holding linked. This executed trade is now in Holdings.');}},
+ markPortfolioUnavailable(message='Dhan account verification is unavailable. Use Sync Dhan holdings.'){portfolioSyncError=message;const wasAvailable=portfolioAvailable;portfolioAvailable=false;let changed=false;for(const p of state.plans.filter(p=>p.holdingSource==='Dhan portfolio')){if(p.holdingVerified!==false){p.holdingVerified=false;p.portfolioSyncNote='Dhan verification unavailable; quantity is the last verified value.';changed=true;}}if(changed)save();else render();},
+ addChartPlan(input){
+  const p={id:uid(),symbol:String(input.symbol||'').trim().toUpperCase(),timeframe:input.timeframe||'Weekly',setup:input.setup||'',entry:Number(input.entry),sl:Number(input.sl),target:Number(input.target),targetMode:'manual',qtyMode:'auto',brokerageMode:'auto',brokerage:0,cmp:null,cmpSource:'Awaiting Dhan',status:'Watching',source:'Chart Lab review',notes:String(input.notes||'').slice(0,10000),enabled:true,expiry:''};
+  p.qty=calc(p.entry,p.sl,p.target).qty;const error=valid(p);if(error)throw Error(error);
+  if(openPlans().some(old=>TradeImport.key(old)===TradeImport.key(p)))throw Error('An open plan already exists for this stock, timeframe and entry. Edit that plan instead.');
+  TradeMath.derive(p,state.settings);state.plans.push(p);save();toast(`${p.symbol}: reviewed plan saved as Watching. No order placed.`);return p.id;
+ },
+ setPlanFlags(flags={}){let changed=false;for(const p of state.plans){if(Object.prototype.hasOwnProperty.call(flags,p.id)&&p.enabled!==flags[p.id]){p.enabled=flags[p.id];changed=true;}}if(changed)save();},
+ plan:id=>{const p=state.plans.find(p=>p.id===id);return p?JSON.parse(JSON.stringify(p)):null;},
+ watchingPlans:()=>state.plans.filter(p=>p.status==='Watching'&&p.enabled!==false).map(p=>JSON.parse(JSON.stringify(p))),
+ settings:()=>({...state.settings,externalCash:state.plans.filter(p=>p.status==='Imported holding'&&!p.liveState).reduce((sum,p)=>sum+p.qty*(p.fill||p.entry),0),externalRisk:state.plans.filter(p=>p.status==='Imported holding'&&!p.liveState).reduce((sum,p)=>sum+p.qty*Math.max(0,(p.fill||p.entry)-p.sl),0)}),
+ setLiveRecords(records){let changed=false;const labels={ARMED:'Live armed',ENTRY_PENDING:'Live entry pending',SUBMITTING:'Live submitting',UNKNOWN:'Live action required',ACTION_REQUIRED:'Live action required',PART_FILLED:'Live partial fill',PROTECTED:'Live holding',EXIT_TRIGGERED:'Live exit pending',CLOSED:'Closed',REJECTED:'Live rejected',CANCELLED:'Live cancelled',EXPIRED:'Live expired',DISARMED:'Watching'};for(const record of records){let p=state.plans.find(p=>p.id===record.tradeId);if(!p){p={id:record.tradeId,symbol:record.symbol,setup:record.setup,timeframe:record.timeframe||'Daily',notes:record.notes||'',expiry:record.expiry||'',cmp:null,cmpSource:'Awaiting Dhan',source:'Dhan live',targetMode:'manual',brokerage:0};state.plans.push(p);}if(p.liveUpdatedAt===record.updatedAt&&!(record.state==='CLOSED'&&(!p.executedAt||!p.completedAt)))continue;Object.assign(p,{liveState:record.state,liveFilledQty:record.filledQty||0,liveUpdatedAt:record.updatedAt,liveAccount:record.account,status:labels[record.state]||'Live action required'});if(record.state!=='DISARMED'){Object.assign(p,{symbol:record.symbol,entry:record.entry,sl:record.sl,target:record.target,qty:record.quantity});if(record.averageFillPrice>0)p.fill=record.averageFillPrice;if(record.state==='CLOSED'){const exitIds=(record.brokerLegs||[]).map(leg=>leg.orderId).filter(Boolean),entryAt=record.entryTradeAt||p.executedAt||'',exitAt=record.exitTradeAt||record.closedAt||p.completedAt||'';Object.assign(p,{qty:record.closedQuantity,exit:record.exitPrice,exitSource:'Dhan execution',exitOrderId:exitIds[0]||p.exitOrderId||'',dhanEntryOrderId:record.orderId||p.dhanEntryOrderId||'',dhanExitOrderIds:exitIds,source:'Dhan live',executedAt:entryAt,completedAt:exitAt,closedAt:exitAt,executedDateOnly:false,closedDateOnly:false,tradeDatesSource:record.entryTradeAt||record.exitTradeAt?'Dhan trade history':p.tradeDatesSource||''});}}changed=true;}if(changed)save();},
+ symbols:()=>[...new Set([...state.plans.map(p=>p.symbol),...(latestPortfolio?.holdings||[]).map(p=>p.symbol),...(latestPortfolio?.positions||[]).map(p=>p.symbol)])],
+ applyQuotes(data){sessionQuotes.clear();for(const [symbol,q] of Object.entries(data.quotes||{}))if(Number.isFinite(q.price)&&q.price>0)sessionQuotes.set(symbol,q);for(const [symbol,q] of Object.entries(data.quotes)){const samples=sessionPrices.get(symbol)||[];if(Number.isFinite(q.price)&&q.price>0&&Number.isFinite(Date.parse(q.fetchedAt))&&(!samples.length||Date.parse(q.fetchedAt)>Date.parse(samples.at(-1).time))){samples.push({price:q.price,time:q.fetchedAt});sessionPrices.set(symbol,samples.slice(-240));}}for(const p of state.plans){const q=data.quotes[p.symbol];if(q&&p.cmpFetchedAt&&Date.parse(q.fetchedAt)<Date.parse(p.cmpFetchedAt))continue;p.cmp=q?.price||null;p.cmpSource=q?'Dhan':'Awaiting Dhan';p.cmpFetchedAt=q?.fetchedAt||'';p.securityId=q?.securityId||p.securityId;p.cmpError=q?'':data.unresolved?.includes(p.symbol)?'Symbol not found in Dhan NSE EQ instrument list':'Dhan did not return a price';if(q)evaluate(p);}save();},
+ clearQuotes(message){sessionQuotes.clear();for(const p of state.plans){p.cmp=null;p.cmpError=message;p.cmpSource='Awaiting Dhan';}render();},
+};
+function applyProvidedPlanUpdates(updates=[]){
+ let changed=false;state.appliedPlanUpdates=state.appliedPlanUpdates||[];
+ for(const update of updates){
+  if(update.kind==='holdingLevels'){
+   if(state.appliedPlanUpdates.includes(update.id)||!portfolioAvailable||!latestPortfolio)continue;
+   const rows=latestPortfolio.holdings.filter(row=>row.symbol===update.symbol);
+   if(rows.length!==1||!(update.sl>0&&update.target>update.sl))continue;
+   const row=rows[0],key=`${latestPortfolio.clientId}:${row.securityId}`;
+   state.holdingLevels=state.holdingLevels||{};state.holdingLevels[key]={sl:update.sl,target:update.target};
+   const matches=state.plans.filter(p=>p.symbol===update.symbol&&['Holding','Imported holding'].includes(p.status)&&ongoingBroker(p)==='Dhan'&&(!p.securityId||String(p.securityId)===String(row.securityId))&&(!p.holdingAccount||p.holdingAccount===latestPortfolio.clientId)&&(!p.liveState||p.liveState==='DISARMED'));
+   if(matches.length===1)Object.assign(matches[0],{sl:update.sl,target:update.target,targetMode:'manual',journalEdited:true});
+   state.appliedPlanUpdates.push(update.id);changed=true;continue;
+  }
+  if(state.appliedPlanUpdates.includes(update.id)||(!['complete','holding','broker'].includes(update.kind)&&!(update.target>update.entry)))continue;
+  const matches=state.plans.filter(p=>p.symbol===update.symbol&&Math.abs(p.entry-update.entry)<0.001&&(!p.liveState||p.liveState==='DISARMED')&&p.exitSource!=='Dhan execution');
+  if(matches.length!==1)continue;
+  const p=matches[0];if(update.kind==='broker'){p.holdingBroker=update.broker;p.journalEdited=true;const note='Zerodha holding; sale will be recorded manually.';if(!(p.notes||'').includes(note))p.notes=[p.notes,note].filter(Boolean).join(' ');}else if(update.kind==='holding'){if(['Watching','Armed','Imported holding'].includes(p.status)){p.plannedQty=p.plannedQty??p.qty;const actual=Number.isSafeInteger(update.qty)&&update.qty>0&&Number.isFinite(update.fill)&&update.fill>0;p.qty=actual?update.qty:p.sourceQty>0?p.sourceQty:0;if(actual){p.fill=update.fill;p.sourceQty=update.qty;}p.qtyMode='manual';p.status='Imported holding';p.holdingDetailsPending=!(p.qty>0);p.journalEdited=true;const pendingNote='Holding confirmed; actual bought quantity and average buy price pending.';p.notes=(p.notes||'').replace(pendingNote,'').trim();if(p.holdingDetailsPending)p.notes=[p.notes,pendingNote].filter(Boolean).join(' ');}}else if(update.kind==='complete'){if(!['Target hit','SL hit','Closed'].includes(p.status)){p.plannedQty=p.qty;p.status=COMPLETED_PENDING;p.qty=0;p.qtyMode='manual';p.journalEdited=true;}}else{p.target=update.target;p.targetMode='manual';}state.appliedPlanUpdates.push(update.id);changed=true;
+ }
+ return changed;
+}
+async function loadProvidedTracker(){try{const response=await fetch('tracker-data.json',{cache:'no-store'});if(!response.ok)return;const data=await response.json();if((state.importedVersions||[]).includes(data.version)){if(applyProvidedPlanUpdates(data.planUpdates))save();return;}const found=TradeImport.detect(data.rows);const rows=TradeImport.review(data.rows,found.row,found.map,state);const count=commitRows(rows);const updated=applyProvidedPlanUpdates(data.planUpdates);if(count){state.plans=state.plans.filter(p=>!p.sample||p.status!=='Watching');state.importedVersions=[...(state.importedVersions||[]),data.version];save();toast(`${count} records loaded from your Tracker 4.0 workbook. No orders placed.`);}else if(updated)save();}catch(e){toast('Provided workbook could not load. Start the Python server, then refresh.');}}
+function updateDeskClock(){$('deskClock').textContent=new Date().toLocaleTimeString('en-IN',{timeZone:'Asia/Kolkata',hour12:false});}
+updateDeskClock();if(typeof setInterval==='function')setInterval(updateDeskClock,1000);
+try{const info=JSON.parse($('initialAppRuntime').textContent||'{}');$('deskBuild').textContent='Holdings UI 15 / backend '+(info.backendVersion||'not confirmed');}catch{}
+if(migrateSavedHoldings()){try{localStorage.setItem('tradeDesk.v1',JSON.stringify(state));}catch{}}
+try{const initial=JSON.parse($('initialDhanPortfolio').textContent||'{}');if(Array.isArray(initial.holdings)&&Array.isArray(initial.positions)){syncPortfolioSnapshot(initial);$('ongoingSyncStatus').textContent=`Dhan holdings loaded with this page: ${initial.holdings.length} holdings, checked ${new Date(initial.checkedAt).toLocaleTimeString('en-IN',{timeZone:'Asia/Kolkata'})} IST.`;}else if(initial.error){TradeDeskData.markPortfolioUnavailable(initial.error);$('ongoingSyncStatus').textContent=initial.error;}else{$('ongoingSyncStatus').textContent='No initial broker snapshot was included in this page. Use Sync Dhan holdings or open http://127.0.0.1:8081.';}}catch(error){$('ongoingSyncStatus').textContent='Could not read the initial account snapshot. Use Sync Dhan holdings to retry.';}
+
+try{const focused=new URLSearchParams(globalThis.location?.search||'').get('holding');if(focused&&/^[A-Z0-9&._ -]{1,30}$/i.test(focused)){$('ongoingSearch').value=focused.toUpperCase();$('ongoingBroker').value='Dhan';}}catch{}
+render();updateCalculation();const requestedPage=globalThis.location?.hash?.slice(1)||(globalThis.location?.pathname==='/holdings'?'live':null);if(['dashboard','planner','completed','importer','live','settings','chartlab'].includes(requestedPage))page(requestedPage);loadProvidedTracker();
+

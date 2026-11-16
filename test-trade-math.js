@@ -1,0 +1,21 @@
+'use strict';
+const assert=require('node:assert/strict'),math=require('./trade-math.js');
+const settings={capital:500000,risk:1,rr:2,deliveryBrokerage:0};
+let p={entry:1000,sl:980,target:1200,targetMode:'auto',status:'Watching',cmp:990};
+math.derive(p,settings);
+assert.equal(p.target,1040);assert.equal(p.qty,250);assert.equal(p.rr,2);
+assert.equal(p.requiredMargin,250000);assert.equal(p.diff,-10);assert.equal(p.diffPercent,-1);assert.equal(p.pnl,null);
+p.targetMode='manual';p.target=1060;math.derive(p,settings);assert.equal(p.rr,3);
+math.derive(p,{...settings,risk:0.5});assert.equal(p.qty,125);
+p={entry:1000,fill:1000,sl:980,target:1040,targetMode:'auto',status:'Closed',cmp:null,qty:29,exit:1010};
+math.derive(p,{...settings,risk:2,rr:3,deliveryBrokerage:5});
+assert.equal(p.qty,29);assert.equal(p.target,1040);assert.equal(p.brokerage,0);assert.equal(p.pnl,211.07);assert.equal(p.diff,null);
+p.sourceBrokerage=15;math.derive(p,settings);assert.equal(p.brokerage,15);assert.equal(p.pnl,193.37);
+assert.equal(math.calculate(10000,9999,10002,settings).qty,50);
+let manual={entry:1000,sl:980,target:1060,targetMode:'manual',qtyMode:'manual',qty:100,brokerageMode:'manual',manualBrokerage:5,status:'Watching',cmp:null};
+math.derive(manual,settings);assert.equal(manual.qty,100);assert.equal(manual.target,1060);assert.equal(manual.brokerage,5);assert.equal(manual.rr,3);
+math.derive(manual,{...settings,risk:0.1});assert.equal(manual.qty,100);assert(!manual.validationWarning,'A future planning quantity is not restricted by current risk settings');
+manual.qtyMode='auto';manual.targetMode='auto';manual.brokerageMode='auto';math.derive(manual,settings);assert.equal(manual.qty,250);assert.equal(manual.target,1040);assert.equal(manual.brokerage,0);
+console.log('Passed: calculated target, manual override, R:R, risk sizing, capital cap, differences, margin, brokerage, historical quantities and P/L.');
+
+const costs=math.deliveryCharges({qty:10,fill:100,exit:110,brokerage:0});assert.equal(costs.transaction,0.06);assert.equal(costs.stt,2);assert.equal(costs.dp+costs.dpGst,14.75);assert.equal(costs.total,16.82);assert.equal(math.realized({qty:10,fill:100,exit:110,brokerage:0}),83.18);assert.equal(math.realized({qty:10,fill:100,exit:110,actualTotalCharges:5}),95);assert.equal(math.deliveryCharges({qty:10,fill:100,exit:110,holdingBroker:'Zerodha'}),null);

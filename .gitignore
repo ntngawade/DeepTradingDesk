@@ -1,0 +1,11 @@
+runtime/
+__pycache__/
+ui-preview/
+tracker-data.json
+.env
+.env.*
+*.sqlite
+*.sqlite3
+*.db
+*.bin
+*.log
