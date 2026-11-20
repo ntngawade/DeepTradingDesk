@@ -16,7 +16,7 @@ async function test(){
  assert.equal(calls.filter(c=>c.path.endsWith('/preview')).length,2,'Global live enable automatically prechecks every enabled Watching plan');
  assert.equal(calls.filter(c=>c.path.endsWith('/arm')).length,2,'Passing plans are queued without a separate Arm click');
  assert(el('liveState').textContent.includes('2 enabled plan(s) queued'));
- const third={id:'P3',symbol:'CIPLA',status:'Watching',enabled:true};const result=await context.LiveDesk.activatePlan(third);assert(result.armed,'Enabling one plan while global live mode is active auto-queues it');
+ const third={id:'P3',symbol:'CIPLA',status:'Watching',enabled:true};const result=await context.LiveDesk.activatePlan(third);assert(result.queued,'Enabling one plan while global live mode is active auto-queues it');
  assert.equal(calls.filter(c=>c.path.endsWith('/arm')).length,3);
  await el('livePause').onclick();assert.equal(enabled,false);assert.equal(records.length,3,'Pause keeps queued broker monitoring records intact');
  assert(timers.includes(5000));assert(!calls.some(c=>c.path.includes('/super/orders')));

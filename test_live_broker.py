@@ -27,7 +27,7 @@ class BrokerTests(unittest.TestCase):
         self.opener = Mock()
         self.broker = DhanLiveBroker(self.session, None, lambda: self.opener)
 
-    def test_only_cnc_limit_super_order_payload_is_submitted(self):
+    def test_only_cnc_market_super_order_with_plan_exits_is_submitted(self):
         self.opener.open.return_value = Response({'orderId': 'ORDER1', 'orderStatus': 'PENDING'})
         result = self.broker.submit({'account': '123', 'correlationId': 'test-correlation', 'securityId': '18143',
                                      'quantity': 5, 'entry': 100, 'sl': 98, 'target': 104})
@@ -36,8 +36,8 @@ class BrokerTests(unittest.TestCase):
         payload = json.loads(request.data)
         self.assertEqual(request.full_url, 'https://api.dhan.co/v2/super/orders')
         self.assertEqual(request.get_method(), 'POST')
-        self.assertEqual((payload['productType'], payload['orderType'], payload['transactionType']), ('CNC', 'LIMIT', 'BUY'))
-        self.assertEqual((payload['price'], payload['stopLossPrice'], payload['targetPrice']), (100, 98, 104))
+        self.assertEqual((payload['productType'], payload['orderType'], payload['transactionType']), ('CNC', 'MARKET', 'BUY'))
+        self.assertEqual((payload['price'], payload['stopLossPrice'], payload['targetPrice']), (0, 98, 104))
         self.assertEqual(payload['trailingJump'], 0)
         self.assertNotIn(self.session.token, request.data.decode())
 
@@ -76,6 +76,35 @@ class BrokerTests(unittest.TestCase):
         self.opener.open.return_value = Response([trade, trade])
         with self.assertRaises(ValueError):
             self.broker.exit_fills(record)
+
+    def test_old_super_order_exit_is_verified_from_historical_trade_api(self):
+        record = {'orderId': 'MAIN', 'account': '123', 'securityId': '18143', 'filledQty': 5,
+                  'submittedAt': '2026-11-16T04:00:00+00:00', 'brokerLegs': [{'orderId': 'SELL'}]}
+        entry = {'orderId':'MAIN','dhanClientId':'123','securityId':'18143','transactionType':'BUY','productType':'CNC',
+                 'exchangeSegment':'NSE_EQ','exchangeTradeId':'B1','tradedQuantity':5,'tradedPrice':100,
+                 'exchangeTime':'2026-11-16 09:20:00'}
+        sale = {'orderId':'SELL','dhanClientId':'123','securityId':'18143','transactionType':'SELL','productType':'CNC',
+                'exchangeSegment':'NSE_EQ','exchangeTradeId':'S1','tradedQuantity':5,'tradedPrice':105,
+                'exchangeTime':'2026-11-16 10:05:00'}
+        self.opener.open.side_effect = [Response([]), Response([entry, sale])]
+        result = self.broker.exit_fills(record)
+        self.assertEqual(result, {'quantity':5,'price':105,'entryTradeAt':'2026-11-16 09:20:00','exitTradeAt':'2026-11-16 10:05:00'})
+        history_url = self.opener.open.call_args_list[1].args[0].full_url
+        self.assertIn('https://api.dhan.co/v2/trades/2026-11-16/', history_url)
+        self.assertTrue(history_url.endswith('/0'))
+
+    def test_historical_leg_sell_id_is_reconciled_at_the_planned_stop(self):
+        record = {'orderId':'MAIN','account':'123','securityId':'18143','filledQty':5,'sl':98,'target':110,'tickSize':0.05,
+                  'submittedAt':'2026-11-16T04:00:00+00:00','brokerLegs':[{'orderId':'MAIN'}]}
+        entry = {'orderId':'MAIN','dhanClientId':'123','securityId':'18143','transactionType':'BUY','productType':'CNC',
+                 'exchangeSegment':'NSE_EQ','exchangeTradeId':'B1','tradedQuantity':5,'tradedPrice':100,
+                 'exchangeTime':'2026-11-16T09:20:00'}
+        sale = {'orderId':'CHILD-SELL','dhanClientId':'123','securityId':'18143','transactionType':'SELL','productType':'CNC',
+                'exchangeSegment':'NSE_EQ','exchangeTradeId':'S1','tradedQuantity':5,'tradedPrice':98,
+                'exchangeTime':'2026-11-16T10:05:00'}
+        self.opener.open.side_effect=[Response([]),Response([entry,sale])]
+        result=self.broker.exit_fills(record)
+        self.assertEqual(result,{'quantity':5,'price':98,'entryTradeAt':'2026-11-16T09:20:00','exitTradeAt':'2026-11-16T10:05:00'})
 
 
 if __name__ == '__main__':

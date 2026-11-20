@@ -17,11 +17,15 @@ ROOT = Path(__file__).resolve().parent
 BUSY = threading.Lock()
 STATUS_CACHE = None
 STATUS_TIME = 0
+API_VERSION = 14
+RAPID_ENGINE = None
+RAPID_LOCK = threading.Lock()
 SETUPS = {'Y': 'YIT', 'H': 'HYIT', 'HY': 'HYIT', 'Q': 'QIT', 'M': 'MIT', 'W': 'WIT', 'D': 'DIT'}
 HIGHER_TIMEFRAMES = {'Y': 'Yearly', 'H': 'Half-yearly', 'HY': 'Half-yearly', 'Q': 'Quarterly', 'M': 'Monthly', 'W': 'Weekly', 'D': 'Daily'}
 TIMEFRAMES = {'Y': 'Yearly', 'Q': 'Quarterly', 'M': 'Monthly', 'W': 'Weekly', 'D': 'Daily', 'H': 'Hourly'}
+NUMERIC_TIMEFRAMES = {1, 2, 3, 5, 10, 15, 20, 30, 45, 60, 75, 90, 120, 125, 150, 180, 240}
 NUMBER = r'(\d[\d,]*(?:\.\s*\d{1,4})?)(?![\w.,])'
-LABELS = {'entry': r'(?:Entr[yv]|E(?=\s*[:=.-]))', 'sl': r'(?:Sto[po](?:[ -]?loss)?|S\.?L\.?)', 'target': r'(?:Target|TGT|T(?=\s*[:=.-]))'}
+LABELS = {'entry': r'(?:Entr[yv]|E(?=\s*[:=.-]))', 'sl': r'(?:Sto[po](?:[ -]?loss)?t?|S\.?L\.?)', 'target': r'(?:Target|TGT|T(?=\s*[:=.-]))'}
 REVERSED_LABELS = {
     'entry': r'(?:E|Entry)',
     'sl': r'(?:SL|Stop(?:\s*[- ]?loss)?)',
@@ -43,16 +47,85 @@ def native_ocr(image=None):
     except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError):
         raise LocalAIError('The built-in chart reader could not finish. Retry with a smaller, clearer PNG/JPEG image.') from None
 
+def rapid_ocr(image):
+    """Run local RapidOCR and return the same normalized line format as Windows OCR."""
+    global RAPID_ENGINE
+    try:
+        import numpy as np
+        from PIL import Image
+        from rapidocr import RapidOCR
+        raw = base64.b64decode(image, validate=True)
+        with Image.open(__import__('io').BytesIO(raw)) as source:
+            source = source.convert('RGB')
+            width, height = source.size
+            regions = [(0, 0, width, height, 'full')]
+            # Price annotations are often tiny. Run overlapping enlarged
+            # regions in addition to the overview and map each box back to
+            # normalized full-image coordinates for the common parser.
+            for yf in (0.0, 0.28, 0.56):
+                for xf in (0.0, 0.42, 0.70):
+                    left = int(width*xf)
+                    top = int(height*yf)
+                    crop_w = min(width-left, max(1, int(width*(0.30 if xf == 0.70 else 0.58))))
+                    crop_h = min(height-top, max(1, int(height*0.42)))
+                    rect = (left, top, left+crop_w, top+crop_h)
+                    if rect != (0, 0, width, height) and crop_w > width*0.16 and crop_h > height*0.15:
+                        regions.append((*rect, 'detail'))
+            # TradeTiger and similar platforms render the instrument and
+            # interval in a thin, small-font title strip. Scan overlapping
+            # header tiles at higher magnification so ticker/TF are not lost
+            # when the full chart OCR skips that tiny text.
+            header_h = max(1, int(height*0.12))
+            for xf in (0.0, 0.32, 0.64):
+                left = int(width*xf)
+                crop_w = min(width-left, max(1, int(width*0.36)))
+                rect = (left, 0, left+crop_w, header_h)
+                if crop_w > width*0.20 and header_h > height*0.06:
+                    regions.append((*rect, 'header'))
+            regions = list(dict.fromkeys(regions))
+        with RAPID_LOCK:
+            if RAPID_ENGINE is None:
+                RAPID_ENGINE = RapidOCR()
+            lines = []
+            for left, top, right_edge, bottom_edge, scan in regions:
+                crop = source.crop((left, top, right_edge, bottom_edge))
+                scale = min(3.0, 2200/max(crop.size))
+                if scale > 1:
+                    crop = crop.resize((int(crop.width*scale), int(crop.height*scale)))
+                frame = np.asarray(crop)
+                output = RAPID_ENGINE(frame)
+                for text, box, score in zip(output.txts if output.txts is not None else (),
+                                           output.boxes if output.boxes is not None else (),
+                                           output.scores if output.scores is not None else ()):
+                    if not text or float(score) < 0.20:
+                        continue
+                    xs = [left+float(point[0])/scale for point in box]
+                    ys = [top+float(point[1])/scale for point in box]
+                    x, y = min(xs)/width, min(ys)/height
+                    right, bottom = max(xs)/width, max(ys)/height
+                    lines.append({'text': str(text), 'x': x, 'y': y, 'right': right,
+                                  'bottom': bottom, 'words': [{'text': str(text), 'x': x, 'y': y,
+                                  'width': max(0.001, right-x), 'height': max(0.001, bottom-y)}], 'scan': scan})
+        if not lines:
+            raise LocalAIError('RapidOCR found no readable chart text. Try a closer, clearer chart screenshot.')
+        return {'lines': lines, 'width': width, 'height': height, 'engine': 'RapidOCR / ONNX Runtime (local)'}
+    except LocalAIError:
+        raise
+    except Exception as error:
+        raise LocalAIError('RapidOCR could not initialize locally: '+str(error)[:240]) from None
+
 def status():
     global STATUS_CACHE, STATUS_TIME
     if STATUS_CACHE is not None and time.monotonic()-STATUS_TIME < 120:
         return STATUS_CACHE
     try:
-        native_ocr()
-        result = {'connected': True, 'engine': 'Built-in Windows OCR + chart label parser', 'independent': True, 'apiVersion': 2,
-                  'message': 'Built-in offline chart reader ready. No Ollama, cloud API or separate AI application is needed.'}
+        if os.name == 'nt':
+            native_ocr()
+        import rapidocr, onnxruntime
+        result = {'connected': True, 'engine': 'RapidOCR '+onnxruntime.__version__+' / ONNX Runtime (local) + chart parser', 'independent': True, 'apiVersion': API_VERSION,
+                  'message': 'RapidOCR is ready and runs chart OCR locally. Images are not sent to a cloud service.'}
     except LocalAIError as error:
-        result = {'connected': False, 'engine': 'Built-in Windows OCR', 'independent': True, 'apiVersion': 2, 'message': str(error)}
+        result = {'connected': False, 'engine': 'Built-in Windows OCR', 'independent': True, 'apiVersion': API_VERSION, 'message': str(error)}
     STATUS_CACHE, STATUS_TIME = result, time.monotonic()
     return result
 
@@ -62,6 +135,15 @@ def price(text):
         return round(value, 4) if math.isfinite(value) and value > 0 else None
     except (ValueError, TypeError):
         return None
+
+def known_stock_symbols():
+    """Reuse the application's user-facing NSE symbol suggestions for OCR fallback."""
+    try:
+        source = (ROOT/'app.js').read_text(encoding='utf-8')
+        match = re.search(r'const\s+stockSymbols\s*=\s*`([^`]*)`', source)
+        return sorted(set(re.findall(r'[A-Z0-9&._-]{2,30}', match.group(1).upper()))) if match else []
+    except OSError:
+        return []
 
 def positioned_lines(document):
     lines = []
@@ -83,7 +165,7 @@ def parse_chart(document):
               'entry': None, 'sl': None, 'target': None, 'targetSource': 'missing', 'axis': None}
     titles = []
     for line in lines:
-        match = re.search(r'([A-Z0-9&._-]{1,30})\s*[\[({]\s*(?:NSE|BSE)\b[^\])}]*[\])}]\s*([A-Z]+|\d+(?:\s*MIN)?)?', line['text'], re.I)
+        match = re.search(r'([A-Z0-9&._-]{1,30})\s*[\[({]\s*(?:NSE|BSE)\b([^\])}]*)[\])}]\s*([A-Z]+|\d+(?:\s*MIN)?)?', line['text'], re.I)
         if match:
             titles.append((match, line))
     # Cropped detail scans may truncate the stock title. A full-image title
@@ -95,16 +177,88 @@ def parse_chart(document):
     if len(symbols) == 1:
         match, line = titles[0]
         result['symbol'] = match.group(1).upper()
-        token = (match.group(2) or '').strip().upper()
+        token = (match.group(3) or '').strip().upper()
+        if not token:
+            inside = match.group(2) or ''
+            trailing = re.search(r'(?<!\d)(\d{1,4})(?:\s*MIN)?\s*$', inside, re.I)
+            if trailing:
+                token = trailing.group(1)
         if token in TIMEFRAMES:
             result['timeframe'], result['timeframeLabel'] = token, TIMEFRAMES[token]
         elif re.fullmatch(r'[1-9]\d{0,3}(?:\s*MIN)?', token):
-            result['timeframe'] = re.match(r'\d+', token).group() + ' min'
+            minutes = re.match(r'\d+', token).group()
+            result['timeframe'] = minutes + ' min'
             result['timeframeLabel'] = result['timeframe']
         evidence['symbol'] = line['text']
         evidence['timeframe'] = line['text']
     elif len(symbols) > 1:
         warnings.append('More than one chart title was found. Paste or upload each chart as a separate image.')
+    # Some chart windows OCR their compact header as separate fragments, or
+    # omit the [NSE - id] wrapper. Recover the ticker only from the top header
+    # using the app's suggestion universe, never from candle/annotation text.
+    header_lines = [line for line in lines if line['y'] <= 0.10 and line['x'] < 0.99]
+    close_header_lines = [line for line in header_lines if line.get('scan') == 'header']
+    full_header_lines = [line for line in header_lines if line.get('scan') == 'full']
+    header_tiers = [tier for tier in (close_header_lines, full_header_lines, header_lines) if tier]
+    if not result['symbol'] and len(symbols) <= 1 and header_lines:
+        known = known_stock_symbols()
+        for tier in header_tiers:
+            matches = set()
+            for line in tier:
+                text = line['text'].upper()
+                for symbol in known:
+                    if re.search(r'(?<![A-Z0-9])'+re.escape(symbol)+r'(?![A-Z0-9])', text):
+                        matches.add(symbol)
+            if len(matches) == 1:
+                result['symbol'] = next(iter(matches))
+                evidence['symbol'] = next(line['text'] for line in tier if result['symbol'] in line['text'].upper())
+                break
+            if len(matches) > 1:
+                warnings.append('Several stock symbols appear in the chart header. Review the title before adding this plan.')
+                break
+    # Read execution interval from the title strip independently of the ticker.
+    # OCR may return the title in fragments, and punctuation around the quote
+    # or the trailing time can prevent an end-anchored match. Clean those known
+    # title fields first, then accept only NSE chart intervals we support.
+    if not result['timeframe'] and header_lines:
+        for tier in header_tiers:
+            intervals = []
+            for line in tier:
+                text = line['text'].strip().upper()
+                clean = re.sub(r'\b\d{1,2}:\d{2}(?::\d{2})?\b', ' ', text)
+                clean = re.sub(r'@\s*[\d,]+(?:\.\d+)?', ' ', clean)
+                clean = re.sub(r'\b(?:NSE|BSE)\s*[- ]?\s*\d+\b', ' ', clean)
+                named = re.search(r'(?:^|[\s\])])([DWMQYH])(?:\s|$)', clean)
+                if named:
+                    intervals.append((named.group(1), line))
+                numeric_periods = re.finditer(r'(?<![A-Z0-9])([1-9]\d{0,3})(?:\.0+)?\s*(MIN(?:UTES?)?|M)?(?![A-Z0-9])', clean)
+                for numeric in numeric_periods:
+                    minutes = int(numeric.group(1))
+                    explicit_minutes = bool(numeric.group(2))
+                    if explicit_minutes or minutes in NUMERIC_TIMEFRAMES:
+                        intervals.append((str(minutes)+' min', line))
+            distinct = {value for value, _ in intervals}
+            if len(distinct) == 1:
+                value, line = intervals[0]
+                result['timeframe'] = value
+                result['timeframeLabel'] = TIMEFRAMES.get(value, value)
+                evidence['timeframe'] = line['text']
+                break
+            if len(distinct) > 1:
+                # A split OCR title can repeat the same period in overlapping
+                # crops. Prefer the right-most supported period in the title.
+                ordered = []
+                for value, line in intervals:
+                    position = max((m.start() for m in re.finditer(r'(?<![A-Z0-9])'+re.escape(value.split()[0])+r'(?![A-Z0-9])', line['text'].upper())), default=-1)
+                    ordered.append((position, value, line))
+                rightmost = max(ordered, key=lambda candidate: candidate[0])
+                if rightmost[0] >= 0 and sum(1 for position, value, _ in ordered if position == rightmost[0] and value == rightmost[1]) == 1:
+                    result['timeframe'] = rightmost[1]
+                    result['timeframeLabel'] = TIMEFRAMES.get(rightmost[1], rightmost[1])
+                    evidence['timeframe'] = rightmost[2]['text']
+                    break
+                warnings.append('Several possible execution intervals appear in the chart header; review the timeframe before adding.')
+                break
     for field, label in LABELS.items():
         found = []
         candidates = [(line, line['text']) for line in lines]
@@ -115,10 +269,19 @@ def parse_chart(document):
             left_center = (left['y']+left['bottom'])/2
             for right in lines[index+1:]:
                 right_center = (right['y']+right['bottom'])/2
-                gap = max(0.0, right['x']-left['right'])
+                # OCR returns line fragments in scan order, not necessarily
+                # left-to-right order. Measure the interval gap symmetrically;
+                # treating a fragment to the left as zero-gap can join an
+                # unrelated axis value to an Entry/SL/Target label.
+                gap = max(0.0, max(left['x'], right['x'])-min(left['right'], right['right']))
                 if abs(left_center-right_center) > 0.012 or gap > 0.10:
                     continue
                 combined = left['text']+' '+right['text'] if left['x'] <= right['x'] else right['text']+' '+left['text']
+                has_label = (re.search(r'\b'+label+r'\b', combined, re.I) or
+                             re.search(r'\b'+REVERSED_LABELS[field]+r'\b', combined, re.I))
+                has_entry_rr = field == 'entry' and re.search(r'\bRR(?:P)?\s*\(', combined, re.I)
+                if not (has_label or has_entry_rr) or not re.search(NUMBER, combined, re.I):
+                    continue
                 candidates.append(({'x':min(left['x'],right['x']), 'y':min(left['y'],right['y']),
                                     'bottom':max(left['bottom'],right['bottom']), 'text':combined}, combined))
         for line, candidate_text in candidates:
@@ -137,6 +300,12 @@ def parse_chart(document):
             if match and price(match.group(1)):
                 origin = next((source for source in lines if source['x']==line['x'] and source['y']==line['y']), line)
                 found.append((price(match.group(1)), origin, bool(re.search(r'\d[,.]\s*\d', match.group(1)))))
+        # Enlarged overlapping crops are useful when the full chart missed a
+        # tiny label, but a crop can begin halfway through a number and create
+        # a plausible-looking false price (e.g. 2138.10 -> 39.10). Prefer a
+        # full-chart label for each field whenever one was recognized.
+        if any(line.get('scan') == 'full' for _, line, _ in found):
+            found = [item for item in found if item[1].get('scan') == 'full']
         # Overlapping OCR crops can return multiple, conflicting readings of
         # the same drawn label. Pick the most complete text at each location;
         # different labels at different chart positions remain ambiguous.
@@ -164,6 +333,84 @@ def parse_chart(document):
             warnings.append('Several different '+field+' prices were marked. Split the chart into one setup per image.')
     if result['target']:
         result['targetSource'] = 'marked on chart'
+    # A chart can lose its decimal point during OCR (for example, 2213.30
+    # becomes 221330.00). TradeTiger prints the target reward, stop risk and
+    # entry R:R beside the lines. When those independent annotations agree,
+    # use them to repair bad OCR prices instead of accepting a 100x value.
+    if result['entry'] and result['sl'] and result['target']:
+        rewards, risks, ratios = [], [], []
+        # A full overview can miss tiny print that a detail crop reads. Use
+        # evidence from every OCR scale; only unique reward/risk/RR readings
+        # are trusted below, so overlapping crop copies do not weaken safety.
+        reconciliation_lines = lines
+        for line in reconciliation_lines:
+            text = line['text']
+            if re.search(r'\b(?:TGT|Target|T)\s*[:=.-]?', text, re.I):
+                delta = re.search(r'\bRs\.?\s*\(?\s*(\d[\d,]*(?:\.\s*\d{1,4})?)', text, re.I)
+                if delta and price(delta.group(1)):
+                    rewards.append(price(delta.group(1)))
+            if re.search(r'\b(?:Stop|SL)\b', text, re.I):
+                delta = re.search(r'\bRs\.?\s*\(?\s*-\s*(\d[\d,]*(?:\.\s*\d{1,4})?)', text, re.I)
+                if delta and price(delta.group(1)):
+                    risks.append(price(delta.group(1)))
+            ratio = re.search(r'\bRR(?:P|C)?\s*\(\s*(\d+(?:\.\d+)?)', text, re.I)
+            if ratio:
+                ratios.append(float(ratio.group(1)))
+        if len(set(rewards)) == 1 and len(set(risks)) == 1 and len(set(ratios)) == 1:
+            reward, risk, ratio = rewards[0], risks[0], ratios[0]
+            if risk > 0 and abs(reward/risk-ratio) <= max(0.08, ratio*0.05):
+                expected_target = round(result['entry']+reward, 4)
+                expected_sl = round(result['entry']-risk, 4)
+                if expected_sl > 0 and expected_sl < result['entry'] < expected_target:
+                    repaired = []
+                    if abs(result['sl']-expected_sl) > max(0.05, risk*0.03):
+                        result['sl'] = expected_sl
+                        evidence['sl'] = 'Corrected from the printed Stop Rs risk and Entry after confirming the printed R:R.'
+                        repaired.append('stop-loss')
+                    if abs(result['target']-expected_target) > max(0.05, reward*0.03):
+                        result['target'] = expected_target
+                        result['targetSource'] = 'reconstructed from printed reward and verified R:R'
+                        evidence['target'] = 'Corrected from the printed Target Rs reward and Entry after confirming the printed R:R.'
+                        repaired.append('target')
+                    if repaired:
+                        observations.append('OCR price reading was corrected for '+ ' and '.join(repaired) +' using the chart’s printed Rs distances and R:R. Verify against the original chart before adding.')
+    # TradeTiger labels print both reward and risk beside their prices
+    # (for example, T:2263.50 Rs(248.10), Stop:1911.40 Rs(-104.00)).
+    # If horizontal strokes obscure a leading digit, recover only when the
+    # two explicit distances and the printed RR independently agree.
+    if result['target'] and (result['entry'] is None or result['sl'] is None or
+                             (result['entry'] is not None and result['sl'] is not None and
+                              result['entry']-result['sl'] < 1)):
+        rewards, risks, ratios = [], [], []
+        for line in lines:
+            text = line['text']
+            if re.search(r'\b(?:TGT|Target|T)\s*[:=.-]?', text, re.I):
+                delta = re.search(r'\bRs\.?\s*\(?\s*(\d[\d,]*(?:\.\s*\d{1,4})?)', text, re.I)
+                if delta: rewards.append(price(delta.group(1)))
+            if re.search(r'\b(?:Stop|SL)\b', text, re.I):
+                delta = re.search(r'\bRs\.?\s*\(?\s*-\s*(\d[\d,]*(?:\.\s*\d{1,4})?)', text, re.I)
+                if delta: risks.append(price(delta.group(1)))
+            ratio = re.search(r'\bRR(?:P|C)?\s*\(\s*(\d+(?:\.\d+)?)', text, re.I)
+            if ratio: ratios.append(float(ratio.group(1)))
+        pairs = [(reward, risk) for reward in rewards for risk in risks
+                 if reward and risk and abs(reward/risk-(ratios[0] if ratios else 0)) <= 0.08]
+        if len(pairs) == 1:
+            reward, risk = pairs[0]
+            recovered_entry = round(result['target']-reward, 4)
+            recovered_sl = round(recovered_entry-risk, 4)
+            if recovered_sl > 0 and recovered_sl < recovered_entry < result['target']:
+                result['entry'], result['sl'] = recovered_entry, recovered_sl
+                evidence['entry'] = 'Recovered from marked target and explicit Rs reward; verified against printed RR.'
+                evidence['sl'] = 'Recovered from explicit Rs risk annotation and verified entry.'
+                observations.append('Entry and stop were reconstructed from the chart’s printed reward, risk and R:R annotations; review both values before adding.')
+        elif result['entry'] and result['sl'] is None and len(set(rewards)) == 1 and len(set(ratios)) == 1:
+            reward, ratio = rewards[0], ratios[0]
+            if reward and ratio > 0:
+                recovered_sl = round(result['entry']-reward/ratio, 4)
+                if 0 < recovered_sl < result['entry'] < result['target'] and abs((result['target']-result['entry'])/reward-1) <= 0.03:
+                    result['sl'] = recovered_sl
+                    evidence['sl'] = 'Calculated from marked Entry, Target reward amount and printed R:R; review before adding.'
+                    observations.append('Stop-loss was reconstructed from the chart’s explicit target reward and printed R:R; verify it against the original stop marking.')
     # Setup comes from the higher-timeframe zone, never from the chart execution timeframe.
     explicit = [(code, line) for line in lines if 0.1 <= line['y'] <= 0.9 for code in re.findall(r'\b(HYIT|YIT|QIT|MIT|WIT|DIT)\b', line['text'], re.I)]
     zones = []
@@ -200,6 +447,15 @@ def parse_chart(document):
         if re.search(r'\b(?:RB[0-9IL]*|DB[0-9IL]*|H\d*|HTF)\s*[-:]\s*(?:HY|H|Y|Q|M|W|D)\b', text, re.I):
             continue
         if re.search(r'\b\d{1,2}[-/](?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[-/]\d{2,4}\b', text, re.I):
+            continue
+        # OCR often clips the first character of Entry or merges a line stroke
+        # into Stop/Target (for example, "ntry:1004.55 RR" or
+        # "Stopt869.40 Rs"). Keep these as price evidence, never as trade notes.
+        has_price_digits = bool(re.search(r'\d', text))
+        annotation_marker = re.search(
+            r'(?:\b(?:entry|entr[yv]|ntry|stop(?:loss)?t?|s\.?l\.?|target|tgt|top)\b|'
+            r'\bT\s*[:=.-]|\bRR(?:P|C)?\b|\bRs\.?\s*[(-])', text, re.I)
+        if has_price_digits and annotation_marker:
             continue
         if any(re.search(r'\b'+label+r'\s*[:=\-]?\s*(?:Rs\.?\s*)?'+NUMBER, text, re.I) or re.search(r'\b'+NUMBER+r'\s*(?:Rs\.?\s*)?'+REVERSED_LABELS[field]+r'\b', text, re.I) for field,label in LABELS.items()):
             continue
@@ -250,6 +506,8 @@ def analyze(body):
     if not BUSY.acquire(blocking=False):
         raise LocalAIError('The built-in reader is busy with another chart. Retry shortly.')
     try:
-        return {'engine': 'Built-in Windows OCR + chart label parser', 'analysis': parse_chart(native_ocr(body['image'])), 'localOnly': True}
+        document = rapid_ocr(body['image'])
+        return {'engine': document.get('engine'), 'apiVersion': API_VERSION,
+                'analysis': parse_chart(document), 'localOnly': True}
     finally:
         BUSY.release()

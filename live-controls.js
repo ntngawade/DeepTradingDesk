@@ -11,7 +11,7 @@
   $('tradingModeBadge').className='pill '+(data.enabled||active.length||data.unverifiedActiveCount?'liveBadge':'paper');
   $('liveState').textContent=data.error||lastError||(data.unverifiedActiveCount?`${data.unverifiedActiveCount} persisted live plans need a Dhan reconnection to verify broker state. Existing orders/exit legs may still be active.`:`${data.enabled?'Live entry monitoring enabled':'New live entries paused'} / ${data.marketSession?'Regular NSE entry window open':'Outside regular entry window'} / ${active.length} active live plans. Enabled Watching plans are prechecked and queued automatically. Broker exits are not cancelled by Pause.`);
   $('liveEnable').disabled=busy||queueing||data.enabled;
-  $('liveRecords').innerHTML=($('liveRecordsFilter').value==='all'?data.records:active).map(r=>`<tr><td>${escape(r.symbol)}</td><td>${escape(r.state)}</td><td>${r.filledQty||0} / ${r.quantity}</td><td>${money(r.entry)}</td><td class="red">${money(r.sl)}</td><td class="green">${money(r.target)}</td><td>${escape(r.orderId||'Not submitted')}</td><td>${escape(r.message)}</td><td>${r.state==='ARMED'?`<button data-live-disable="${escape(r.tradeId)}">Disable plan</button>`:''}</td></tr>`).join('')||'<tr><td colspan="9">No ongoing app automation records in this view. Current account holdings appear above.</td></tr>';
+  $('liveRecords').innerHTML=($('liveRecordsFilter').value==='all'?data.records:active).map(r=>`<tr><td>${escape(r.symbol)}</td><td>${r.state==='ARMED'?'Watching entry':escape(r.state)}</td><td>${r.filledQty||0} / ${r.quantity}</td><td>${money(r.entry)}</td><td class="red">${money(r.sl)}</td><td class="green">${money(r.target)}</td><td>${escape(r.orderId||'Not submitted')}</td><td>${escape(r.message)}</td></tr>`).join('')||'<tr><td colspan="8">No ongoing app automation records in this view. Current account holdings appear above.</td></tr>';
   globalThis.TradeDeskData.setPlanFlags?.(data.planEnabled||{});globalThis.TradeDeskData.setLiveRecords(data.records);
  }
  async function refresh(){if(busy||queueing)return;try{const data=await api('status');display(data);if(!initialStatusLoaded){initialStatusLoaded=true;if(data.enabled)await activatePlans(globalThis.TradeDeskData.watchingPlans?.()||[]);}}catch(error){$('liveState').textContent=error.message;$('tradingModeBadge').textContent='LIVE STATUS UNAVAILABLE';}}
@@ -39,13 +39,12 @@
  async function activatePlan(plan){
   if(!lastDisplay)try{lastDisplay=await api('status');display(lastDisplay);}catch(error){return {error:error.message};}
   if(!lastDisplay?.enabled)return {waiting:true};
-  const result=await activatePlans([plan]);return result.errors?.length?{error:result.errors.join(' / ')}:{armed:result.queued>0,waiting:result.queued===0};
+  const result=await activatePlans([plan]);return result.errors?.length?{error:result.errors.join(' / ')}:{queued:result.queued>0,waiting:result.queued===0};
  }
  $('liveEnable').onclick=async()=>{const ok=await perform('enable',{acknowledgeRealOrders:true});if(ok){const plans=globalThis.TradeDeskData.watchingPlans?.()||[];const result=await activatePlans(plans);if(!result.queued&&!result.errors?.length)$('liveState').textContent='Live execution is enabled. No enabled Watching plans need queuing.';}};
  $('livePause').onclick=pause;
  $('liveRefresh').onclick=()=>{refresh();globalThis.TradeDeskPortfolio?.refresh();};
  $('liveRecordsFilter').onchange=()=>{if(lastDisplay)display(lastDisplay);};
- document.body.addEventListener('click',async event=>{const button=event.target.closest('[data-live-disable]');if(!button)return;try{const result=await api('plan-enabled',{tradeId:button.dataset.liveDisable,enabled:false});globalThis.TradeDeskData.setPlanFlags?.(result.planEnabled||{});globalThis.TradeDeskData.setLiveRecords(result.records||[]);lastError=null;display(await api('status'));}catch(error){lastError=error.message;$('liveState').textContent=error.message;}});
  globalThis.LiveDesk={pause,refresh,activatePlan,isEnabled:()=>!!lastDisplay?.enabled};
  refresh();setInterval(refresh,5000);
 })();

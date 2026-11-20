@@ -2,6 +2,8 @@
 import json
 import math
 import ipaddress
+import re
+from datetime import date, datetime, timedelta
 from urllib.request import Request
 from urllib.error import HTTPError, URLError
 
@@ -28,7 +30,8 @@ class DhanLiveBroker:
 
     def call(self, path, payload=None):
         allowed = {'/fundlimit', '/super/orders', '/holdings', '/positions', '/orders', '/trades', '/ip/getIP'}
-        if path not in allowed or payload is not None and path != '/super/orders':
+        historical_trades = bool(re.fullmatch(r'/trades/\d{4}-\d{2}-\d{2}/\d{4}-\d{2}-\d{2}/\d{1,3}', path))
+        if path not in allowed and not historical_trades or payload is not None and path != '/super/orders':
             raise ValueError('Unsupported live API request.')
         with self.session.lock:
             if not self.session.token or not self.session.profile:
@@ -134,22 +137,93 @@ class DhanLiveBroker:
             raise ValueError('The connected Dhan account changed.')
         payload = {'dhanClientId': account, 'correlationId': record['correlationId'],
                    'transactionType': 'BUY', 'exchangeSegment': 'NSE_EQ', 'productType': 'CNC',
-                   'orderType': 'LIMIT', 'securityId': record['securityId'], 'quantity': record['quantity'],
-                   'price': record['entry'], 'targetPrice': record['target'], 'stopLossPrice': record['sl'],
+                   'orderType': 'MARKET', 'securityId': record['securityId'], 'quantity': record['quantity'],
+                   'price': 0, 'targetPrice': record['target'], 'stopLossPrice': record['sl'],
                    'trailingJump': 0}
         return self.call('/super/orders', payload)
 
     def exit_fills(self, record):
         rows = self.call('/trades')
+        result = self._exit_fills_from_rows(record, rows)
+        if result:
+            return result
+        # Dhan's Super Order list and trade book are day-scoped. For older CNC
+        # orders, reconcile from the historical trade endpoint before treating
+        # a completed sale as unresolved.
+        anchor = record.get('submittedAt') or record.get('entryTradeAt') or record.get('reviewedAt')
+        try:
+            start = datetime.fromisoformat(str(anchor).replace('Z', '+00:00')).date()
+        except (TypeError, ValueError):
+            return None
+        end = date.today()
+        if start > end or (end - start).days > 90:
+            return None
+        history = []
+        for page in range(20):
+            batch = self.call(f'/trades/{start.isoformat()}/{end.isoformat()}/{page}')
+            if not isinstance(batch, list):
+                raise ValueError('Dhan historical trade response is invalid; keep the trade unresolved.')
+            history.extend(batch)
+            if len(batch) < 100:
+                break
+        else:
+            raise ValueError('Dhan historical trade history is too large to verify safely; keep the trade unresolved.')
+        return self._exit_fills_from_rows(record, history)
+
+    def _exit_fills_from_rows(self, record, rows):
         if not isinstance(rows, list):
             raise ValueError('Cannot verify exit executions in Dhan trade book.')
         ids = {record['orderId']} | {str(leg.get('orderId')) for leg in record.get('brokerLegs', []) if leg.get('orderId')}
         entry_rows = [row for row in rows if str(row.get('orderId')) == str(record['orderId']) and
                       str(row.get('dhanClientId')) == record['account'] and str(row.get('securityId')) == record['securityId'] and
                       row.get('transactionType') == 'BUY' and row.get('productType') == 'CNC' and row.get('exchangeSegment') == 'NSE_EQ']
-        matches = [row for row in rows if str(row.get('orderId')) in ids and
-                   str(row.get('dhanClientId')) == record['account'] and str(row.get('securityId')) == record['securityId']
-                   and row.get('transactionType') == 'SELL' and row.get('productType') == 'CNC' and row.get('exchangeSegment') == 'NSE_EQ']
+        entry_ids, entry_qty = set(), 0
+        for row in entry_rows:
+            trade_id, q, traded_price = row.get('exchangeTradeId'), row.get('tradedQuantity'), row.get('tradedPrice')
+            if (not trade_id or trade_id in entry_ids or not isinstance(q, int) or isinstance(q, bool) or q <= 0
+                    or not isinstance(traded_price, (int, float)) or isinstance(traded_price, bool) or not math.isfinite(traded_price) or traded_price <= 0):
+                raise ValueError('Invalid or duplicate broker entry fills. Review in Dhan.')
+            entry_ids.add(trade_id)
+            entry_qty += q
+        expected = record['filledQty']
+        if entry_qty != expected:
+            return None
+        entry_stamps = [row.get('exchangeTime') or row.get('updateTime') or row.get('createTime') for row in entry_rows]
+        entry_stamps = [stamp for stamp in entry_stamps if isinstance(stamp, str) and len(stamp) == 19]
+        try:
+            entry_time = min(datetime.fromisoformat(stamp.replace('Z', '+00:00')).replace(tzinfo=None) for stamp in entry_stamps)
+        except ValueError:
+            entry_time = None
+        all_sells = [row for row in rows if str(row.get('dhanClientId')) == record['account'] and
+                     str(row.get('securityId')) == record['securityId'] and row.get('transactionType') == 'SELL' and
+                     row.get('productType') == 'CNC' and row.get('exchangeSegment') == 'NSE_EQ']
+        matches = [row for row in all_sells if str(row.get('orderId')) in ids]
+        linked_ids = {str(row.get('exchangeTradeId')) for row in matches}
+        # Some Dhan exits appear in historical trades under the exchange leg's
+        # order ID instead of the parent Super Order ID. Accept those only if
+        # a full quantity was sold after the verified entry at the plan's SL or
+        # target price; this avoids closing on unrelated same-stock sales.
+        linked_qty = sum(int(row.get('tradedQuantity') or 0) for row in matches)
+        if linked_qty < expected and entry_time is not None:
+            tick = float(record.get('tickSize') or 0.05)
+            for row in all_sells:
+                if str(row.get('orderId')) in ids or str(row.get('exchangeTradeId')) in linked_ids:
+                    continue
+                stamp = row.get('exchangeTime') or row.get('updateTime') or row.get('createTime')
+                try:
+                    sold_at = datetime.fromisoformat(str(stamp).replace('Z', '+00:00')).replace(tzinfo=None)
+                except ValueError:
+                    continue
+                quantity, traded_price = row.get('tradedQuantity'), row.get('tradedPrice')
+                if (sold_at <= entry_time or not isinstance(quantity, int) or isinstance(quantity, bool) or quantity <= 0
+                        or not isinstance(traded_price, (int, float)) or isinstance(traded_price, bool) or not math.isfinite(traded_price)
+                        or min(abs(traded_price-record['sl']), abs(traded_price-record['target'])) > tick/2+1e-9):
+                    continue
+                matches.append(row)
+                linked_ids.add(str(row.get('exchangeTradeId')))
+                linked_qty += quantity
+                if linked_qty >= expected:
+                    break
         seen, qty, value, times = set(), 0, 0.0, []
         for row in matches:
             trade_id = row.get('exchangeTradeId')
@@ -161,13 +235,10 @@ class DhanLiveBroker:
             if isinstance(stamp, str) and len(stamp) == 19:
                 times.append(stamp)
             qty, value = qty+q, value+q*price
-        expected = record['filledQty']
         if qty > expected:
             raise ValueError('Exit executions exceed recorded entry fills. Review in Dhan.')
         if not qty or qty != expected:
             return None
-        entry_times = [row.get('exchangeTime') or row.get('updateTime') or row.get('createTime') for row in entry_rows]
-        entry_times = [stamp for stamp in entry_times if isinstance(stamp, str) and len(stamp) == 19]
         return {'quantity': qty, 'price': value/qty,
-                'entryTradeAt': min(entry_times) if entry_times else None,
+                'entryTradeAt': min(entry_stamps) if entry_stamps else None,
                 'exitTradeAt': max(times) if times else None}

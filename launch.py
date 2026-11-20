@@ -37,55 +37,33 @@ def is_backend(port):
 
 
 def select_backend():
-    outdated=[]
-    for port in range(8080, 8091):
-        info=backend_info(port)
-        if info and info.get('backendVersion',0)>=APP_VERSION:
+    port = 8081
+    info = backend_info(port)
+    if info:
+        if info.get('backendVersion', 0) >= APP_VERSION:
             return port
-        if info:
-            outdated.append(port)
-    if outdated:
-        raise RuntimeError('An older Deep Trading Desk backend is still running on port(s) '+', '.join(map(str,outdated))+'. Restart that backend before opening the app; the launcher will not silently switch to a different storage origin.')
-    for port in range(8080, 8091):
-        try:
-            with socket.socket() as probe:
-                probe.bind(('127.0.0.1', port))
-        except OSError:
-            continue
-        process = subprocess.Popen(
-            [sys.executable, str(ROOT / 'server.py'), '--port', str(port)],
-            cwd=str(ROOT), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
-        )
-        for _ in range(30):
-            if is_backend(port):
-                return port
-            if process.poll() is not None:
-                break
-            time.sleep(0.2)
-    raise RuntimeError('Cannot start the app. Run python server.py --port 8081 in a terminal to inspect the error.')
-
-
-def preserve_compatibility_address(port):
-    """Preserve existing 8081 browser storage without starting another engine."""
-    if port != 8080:
-        return
+        raise RuntimeError('An older Deep Trading Desk backend is running on port 8081. Close that server, then start this launcher again.')
     try:
         with socket.socket() as probe:
             probe.bind(('127.0.0.1', 8081))
-    except OSError:
-        return
-    subprocess.Popen(
-        [sys.executable, str(ROOT / 'compat_server.py'), '--port', '8081', '--upstream', str(port)],
-        cwd=str(ROOT), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
+    except OSError as error:
+        raise RuntimeError('Port 8081 is already in use. Close its current application, then restart Deep Trading Desk.') from error
+    process = subprocess.Popen(
+        [sys.executable, str(ROOT / 'server.py'), '--port', str(port)], cwd=str(ROOT),
+        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
     )
+    for _ in range(40):
+        if is_backend(port):
+            return port
+        if process.poll() is not None:
+            break
+        time.sleep(0.25)
+    raise RuntimeError('Cannot start Deep Trading Desk on port 8081. Run python server.py --port 8081 in PowerShell to inspect the error.')
 
 
 if __name__ == '__main__':
     port = select_backend()
-    preserve_compatibility_address(port)
     url = f'http://127.0.0.1:{port}'
     print(f'Opening Deep Trading Desk: {url}')
     webbrowser.open(url)

@@ -1,4 +1,4 @@
-"""Durable, explicitly armed CNC Super Orders. No automatic submission retries."""
+"""Durable CNC entry monitoring and Super Order submission. No automatic retries."""
 import hashlib
 import json
 import math
@@ -35,26 +35,11 @@ def nonnegative(value, name):
     return value
 
 
-def entry_touched(record, price, fetched_at):
-    """Legacy point-touch helper; live entries now use the configured proximity band."""
-    current, entry = Decimal(str(price)), Decimal(str(record['entry']))
-    if current == entry:
-        return True
-    previous, previous_at = record.get('lastCmp'), record.get('lastCmpAt')
-    if previous is None or not previous_at:
-        return False
-    earlier, latest = datetime.fromisoformat(previous_at), datetime.fromisoformat(fetched_at)
-    if not 0 < (latest-earlier).total_seconds() <= 15 or earlier.astimezone(IST).date() != latest.astimezone(IST).date():
-        return False
-    before = Decimal(str(previous))
-    return before < entry < current or current < entry < before
-
-
 def normalize_plan(plan, settings, instrument, trigger=1):
     if not isinstance(plan, dict) or not isinstance(settings, dict):
         raise ValueError('Plan and risk settings are required.')
     if plan.get('status') != 'Watching':
-        raise ValueError('Only an unexecuted Watching plan can be armed live.')
+        raise ValueError('Only an enabled, unexecuted Watching plan can be sent live.')
     if plan.get('enabled') is False:
         raise ValueError('This trade plan is disabled.')
     trade_id = plan.get('id')
@@ -89,7 +74,7 @@ def normalize_plan(plan, settings, instrument, trigger=1):
             'cash': round(entry * quantity, 2), 'risk': round(float(per_share * quantity), 2),
             'capital': capital, 'triggerPercent': trigger,
             'externalCash': nonnegative(settings.get('externalCash', 0), 'recorded holding capital'),
-            'expiry': expiry, 'tickSize': float(tick), 'product': 'CNC', 'orderType': 'LIMIT', 'entryRule': 'WITHIN_TRIGGER_BAND'}
+            'expiry': expiry, 'tickSize': float(tick), 'product': 'CNC', 'orderType': 'MARKET', 'entryRule': 'WITHIN_TRIGGER_BAND_TOUCH_ENTRY_MARKET'}
 
 
 class LiveEngine:
@@ -117,6 +102,9 @@ class LiveEngine:
                 record = json.loads(raw)
                 if record['state'] == 'SUBMITTING':
                     record.update(state='UNKNOWN', message='Restart during submission. Reconciliation required; no retry will be sent.')
+                    self._write(account, record)
+                elif record['state'] == 'ARMED' and (record.get('orderType') != 'MARKET' or record.get('entryRule') != 'WITHIN_TRIGGER_BAND_TOUCH_ENTRY_MARKET'):
+                    record.update(orderType='MARKET', entryRule='WITHIN_TRIGGER_BAND_TOUCH_ENTRY_MARKET', message='Watching CMP; when it comes within 1% and touches planned entry from above, submit one CNC market Super Order with the planned SL and target.')
                     self._write(account, record)
 
     def _write(self, account, record):
@@ -181,7 +169,7 @@ class LiveEngine:
                     'account': account, 'records': self.records(account) if account else [],
                     'error': self.error, 'marketSession': self.is_open(), 'triggerPercent': 1,
                     'unverifiedActiveCount': unverified,
-                    'engine': 'CNC_SUPER_ORDER', 'entryRule': 'WITHIN_TRIGGER_BAND', 'serverRequiredForNewEntries': True}
+                    'engine': 'CNC_SUPER_ORDER', 'entryRule': 'WITHIN_TRIGGER_BAND_TOUCH_ENTRY_MARKET', 'entryOrderType': 'MARKET', 'serverRequiredForNewEntries': True}
 
     def _check_capacity(self, snapshot, records, funds):
         active = [r for r in records if r['state'] in ACTIVE and r['tradeId'] != snapshot['tradeId']]
@@ -222,7 +210,7 @@ class LiveEngine:
         account = self.broker.ready()
         with self.lock:
             if not self.enabled or account != self.enabled_account:
-                raise ValueError('Enable live CNC automation before arming a reviewed plan.')
+                raise ValueError('Enable live CNC automation before queueing this enabled plan.')
             snapshot = self.previews.get(preview_id)
             if not snapshot or snapshot['account'] != account:
                 raise ValueError('Create a fresh live-order review first.')
@@ -237,7 +225,7 @@ class LiveEngine:
                     raise ValueError('Duplicate live arming is blocked.')
                 self._check_capacity(snapshot, self.records(account), snapshot['availableFunds'])
                 record = {k: v for k, v in snapshot.items() if k not in ('previewId', 'availableFunds')}
-                record.update(state='ARMED', orderId=None, filledQty=0, correlationId='NTD'+hashlib.sha256((account+'|'+snapshot['tradeId']).encode()).hexdigest()[:26], message=f'Waiting for CMP within {snapshot["triggerPercent"]:g}% of planned entry; submitted order uses the planned entry limit.')
+                record.update(state='ARMED', orderId=None, filledQty=0, correlationId='NTD'+hashlib.sha256((account+'|'+snapshot['tradeId']).encode()).hexdigest()[:26], message=f'Watching CMP; when it comes within {snapshot["triggerPercent"]:g}% and touches planned entry from above, submit one CNC market Super Order with the planned SL and target.')
                 self._write(account, record)
                 del self.previews[preview_id]
                 return dict(record)
@@ -256,7 +244,7 @@ class LiveEngine:
                         or current['reviewedAt'] != candidate['reviewedAt'] or not self.plan_enabled(candidate['tradeId'])):
                     self.db.rollback()
                     return None
-                current.update(state='SUBMITTING', submittedAt=now(), message='Submitting the reviewed CNC Super Order once.')
+                current.update(state='SUBMITTING', submittedAt=now(), message='Submitting one CNC market Super Order after planned entry was touched.')
                 self._write(account, current)
                 return current
             except Exception:
@@ -289,7 +277,29 @@ class LiveEngine:
             matches = [o for o in orders if str(o.get('dhanClientId')) == account and
                        ((record.get('orderId') and str(o.get('orderId')) == record['orderId']) or o.get('correlationId') == record['correlationId'])]
             if len(matches) != 1:
-                record.update(state='ACTION_REQUIRED', message='Cannot uniquely reconcile broker order. Check Dhan; no resubmission will occur.')
+                # Dhan's Super Order list contains orders placed on the current
+                # day only. Older submitted CNC trades must be checked against
+                # historical BUY and SELL fills before remaining unresolved.
+                last_check = record.get('historicalCheckAt')
+                try:
+                    checked_at = datetime.fromisoformat(str(last_check).replace('Z', '+00:00')) if last_check else None
+                except ValueError:
+                    checked_at = None
+                if record.get('filledQty', 0) and (checked_at is None or (datetime.now(timezone.utc)-checked_at).total_seconds() >= 60):
+                    try:
+                        sale = self.broker.exit_fills(record)
+                        record['historicalCheckAt'] = now()
+                        if sale:
+                            record.update(state='CLOSED', exitPrice=sale['price'], closedQuantity=sale['quantity'],
+                                          closedAt=sale.get('exitTradeAt') or now(), entryTradeAt=sale.get('entryTradeAt') or record.get('entryTradeAt'),
+                                          exitTradeAt=sale.get('exitTradeAt'), message='Full linked BUY and SELL executions verified in Dhan trade history.')
+                        else:
+                            record.update(state='ACTION_REQUIRED', message='Order is no longer in Dhan’s current Super Order list. Historical trade history does not yet confirm a full linked sale; check Dhan before enabling new entries.')
+                    except Exception as error:
+                        record['historicalCheckAt'] = now()
+                        record.update(state='ACTION_REQUIRED', message='Could not verify the old Super Order in Dhan historical trade history: '+str(error)[:220])
+                else:
+                    record.update(state='ACTION_REQUIRED', message='Order is outside Dhan’s current Super Order list; waiting for the next historical trade verification. No resubmission will occur.')
             else:
                 order = matches[0]
                 if (str(order.get('securityId')) != record['securityId'] or order.get('transactionType') != 'BUY'
@@ -397,10 +407,12 @@ class LiveEngine:
                     if not current or current['state'] != 'ARMED' or current['reviewedAt'] != record['reviewedAt']:
                         self.db.rollback()
                         continue
-                    current.update(lastCmp=price, lastCmpAt=quote['fetchedAt'], message=f'Within {record["triggerPercent"]:g}% trigger zone; checking order readiness.' if near else 'Waiting for CMP to enter the trigger zone.')
+                touched_from_above = near and price <= record['entry']
+                current.update(lastCmp=price, lastCmpAt=quote['fetchedAt'], message=('Entry touched inside the trigger band; checking market-order readiness.' if touched_from_above else f'Waiting for CMP to come within {record["triggerPercent"]:g}% and touch Entry from above.'))
+                with self.lock:
                     self._write(account, current)
-                    record = current
-                if not near:
+                record = current
+                if not touched_from_above:
                     continue
                 if price <= record['sl'] or price >= record['target']:
                     raise ValueError('CMP has crossed the planned stop-loss or target. Review the plan.')
@@ -413,7 +425,8 @@ class LiveEngine:
                     continue
                 latest_price = positive(latest['price'], 'live CMP')
                 latest_age = (datetime.now(timezone.utc) - datetime.fromisoformat(latest['fetchedAt'])).total_seconds()
-                if not 0 <= latest_age <= 15 or abs(latest_price-record['entry'])/record['entry']*100 > record['triggerPercent']+1e-9:
+                latest_near = abs(latest_price-record['entry'])/record['entry']*100 <= record['triggerPercent']+1e-9
+                if not 0 <= latest_age <= 15 or not latest_near or latest_price > record['entry']:
                     continue
                 if latest_price <= record['sl'] or latest_price >= record['target']:
                     raise ValueError('Latest CMP crossed SL or target. Review the live plan.')
@@ -425,7 +438,7 @@ class LiveEngine:
                     order_id = result.get('orderId')
                     if not order_id:
                         raise ValueError('No broker order ID was returned.')
-                    record.update(orderId=str(order_id), state='REJECTED' if result.get('orderStatus') == 'REJECTED' else 'ENTRY_PENDING', message='Super Order acknowledged by broker; awaiting fill reconciliation.')
+                    record.update(orderId=str(order_id), state='REJECTED' if result.get('orderStatus') == 'REJECTED' else 'ENTRY_PENDING', message='Market Super Order acknowledged after Entry touch; checking fill and linked SL/target with Dhan.')
                 except Exception as error:
                     definitive = getattr(error, 'definitive_rejection', False)
                     record.update(state='REJECTED' if definitive else 'UNKNOWN', message='Dhan rejected the order. Check IP, funds and permissions; no automatic retry.' if definitive else 'Submission outcome uncertain. Check Dhan; automatic retry is blocked.')

@@ -4,7 +4,8 @@ async function test(){
  const elements=new Map(),timers=[],calls=[],applied=[],cleared=[];
  const el=id=>{if(!elements.has(id))elements.set(id,{textContent:'',disabled:false});return elements.get(id);};
  let fail=false,empty=false;
- const context={Date,AbortSignal,Error,Set,document:{getElementById:el,hidden:false,addEventListener(){}},setInterval(fn,delay){timers.push({fn,delay});},TradeDeskData:{symbols:()=>['JIOFIN','UNKNOWN'],applyQuotes:data=>applied.push(data),clearQuotes:text=>cleared.push(text)},fetch:async(path,options)=>{
+ const NativeDate=Date;class TestDate extends NativeDate{constructor(...args){super(...(args.length?args:['2026-11-17T04:00:00Z']));}}
+ const context={Date:TestDate,Intl,AbortSignal,Error,Set,document:{getElementById:el,hidden:false,addEventListener(){}},setInterval(fn,delay){timers.push({fn,delay});},TradeDeskData:{symbols:()=>['JIOFIN','UNKNOWN'],applyQuotes:data=>applied.push(data),clearQuotes:text=>cleared.push(text)},fetch:async(path,options)=>{
   calls.push({path,options});return {ok:!fail,headers:{get:()=> 'application/json'},json:async()=>fail?{error:'Data subscription required'}:empty?{quotes:{},unresolved:[],missing:['JIOFIN'],quoteDiagnostics:{apiStatus:'success',requestedInstrumentCount:1,returnedInstrumentCount:0,returnedSegmentNames:['NSE_EQ']},fetchedAt:'2026-11-14T05:00:00Z'}:{quotes:{JIOFIN:{price:250,source:'Dhan',fetchedAt:'2026-11-14T05:00:00Z'}},unresolved:['UNKNOWN'],missing:[],fetchedAt:'2026-11-14T05:00:00Z'}};
  }};
  vm.createContext(context);vm.runInContext(fs.readFileSync(__dirname+'/market-data.js','utf8'),context);

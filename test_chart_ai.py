@@ -6,6 +6,12 @@ import unittest
 from unittest.mock import patch
 import chart_ai
 
+try:
+    import rapidocr  # noqa: F401
+    RAPID_OCR_AVAILABLE=True
+except ImportError:
+    RAPID_OCR_AVAILABLE=False
+
 def line(text, y, x=0.2):
     return {'text': text, 'words': [{'text': text, 'x': x, 'y': y, 'width': 0.2, 'height': 0.015}]}
 
@@ -97,6 +103,136 @@ class ChartReaderTests(unittest.TestCase):
         self.assertEqual(result['target'],120)
         self.assertTrue(result['usable'],result['warnings'])
 
+    def test_price_far_left_of_label_is_not_joined_as_entry(self):
+        document={'lines':[line('TESTCO[NSE - 9500] W',0.005,0.005),
+                           line('H1-Q :105.00',0.62,0.01),
+                           line('E:',0.70,0.65),line('200.00',0.70,0.10),
+                           line('Stop:90.00',0.78,0.65),line('T:120.00',0.56,0.72)]}
+        result=chart_ai.parse_chart(document)
+        self.assertIsNone(result['entry'])
+        self.assertFalse(result['usable'])
+
+    def test_bdl_ocr_stop_artifact_is_read_and_price_annotations_are_not_notes(self):
+        document={'lines':[line('BDL[NSE - 2144] W',0.005,0.005),
+                           line('RB1-Q 0.41',0.62,0.01),
+                           line('ntry: 1004.55 RR(2.14)',0.70,0.60),
+                           line('Stopt869.40 Rs(-135.15)',0.78,0.60),
+                           line('•top:ooy.4u',0.56,0.72),
+                           line('This is followup zone',0.32,0.42)]}
+        result=chart_ai.parse_chart(document)
+        self.assertEqual(result['symbol'],'BDL')
+        self.assertEqual(result['entry'],1004.55)
+        self.assertEqual(result['sl'],869.40)
+        self.assertIsNone(result['target'])
+        self.assertIn('This is followup zone',result['notes'])
+        self.assertFalse(any('1004.55' in note or '869.40' in note or 'ooy.4u' in note for note in result['notes']))
+        self.assertFalse(result['usable'])
+
+    def test_caplipoint_chart_entry_stop_target_and_daily_timeframe(self):
+        document={'lines':[line('CAPLIPOINT[NSE - 3906] D',0.005,0.005),
+                           line('H1-W :2062.92',0.64,0.01),
+                           line('H2-W :1942.74',0.72,0.01),
+                           line('Entry: 2015.40 RR(2.39)',0.68,0.14),
+                           line('Stop:1911.40 Rs(-104)',0.75,0.14),
+                           line('T:2263.50 Rs(248.1)',0.55,0.74)]}
+        result=chart_ai.parse_chart(document)
+        self.assertEqual(result['symbol'],'CAPLIPOINT')
+        self.assertEqual(result['timeframe'],'D')
+        self.assertEqual(result['setup'],'WIT')
+        self.assertEqual(result['entry'],2015.40)
+        self.assertEqual(result['sl'],1911.40)
+        self.assertEqual(result['target'],2263.50)
+        self.assertTrue(result['usable'],result['warnings'])
+
+    def test_caplipoint_recovers_entry_and_stop_from_explicit_rr_deltas(self):
+        document={'lines':[line('CAPLIPOINT[NSE - 3906] D',0.005,0.005),
+                           line('H1-W :2062.92',0.64,0.01),
+                           line('H2-W :1942.74',0.72,0.01),
+                           line('RR(2.39)',0.68,0.14),
+                           line('Stop. 11.40 Rs(-104)',0.75,0.14),
+                           line('T:2263.50 Rs(248.1)',0.55,0.74)]}
+        result=chart_ai.parse_chart(document)
+        self.assertEqual(result['entry'],2015.4)
+        self.assertEqual(result['sl'],1911.4)
+        self.assertEqual(result['target'],2263.5)
+        self.assertTrue(result['usable'],result['warnings'])
+
+    def test_numeric_execution_interval_and_ocr_decimal_repair_from_chart_risk_reward(self):
+        document={'lines':[line('CAPLIPOINT[NSE - 3906] 125',0.005,0.005),
+                           line('H1-W :2062.92',0.64,0.01),
+                           line('Entry: 2138.10 RR(2.53)',0.68,0.14),
+                           line('Stop: 210840.00 Rs(-29.70)',0.75,0.14),
+                           line('T: 221330.00 Rs(75.20)',0.55,0.74)]}
+        result=chart_ai.parse_chart(document)
+        self.assertEqual(result['symbol'],'CAPLIPOINT')
+        self.assertEqual(result['timeframe'],'125 min')
+        self.assertEqual(result['entry'],2138.10)
+        self.assertEqual(result['sl'],2108.40)
+        self.assertEqual(result['target'],2213.30)
+        self.assertTrue(result['usable'],result['warnings'])
+        self.assertIn('target',result['observations'][0])
+
+    def test_decimal_repair_uses_risk_annotation_from_detail_crop(self):
+        full=[line('CAPLIPOINT[NSE - 3906] 125',0.005,0.005),
+              line('Entry: 2138.10',0.68,0.14),
+              line('Stop: 210840.00',0.75,0.14),
+              line('T: 221330.00',0.55,0.74)]
+        detail=[line('Entry: 2138.10 RR(2.53)',0.68,0.14),
+                line('Stop: 210840.00 Rs(-29.70)',0.75,0.14),
+                line('T: 221330.00 Rs(75.20)',0.55,0.74)]
+        for item in full: item['scan']='full'
+        for item in detail: item['scan']='detail'
+        result=chart_ai.parse_chart({'lines':full+detail})
+        self.assertEqual(result['sl'],2108.40)
+        self.assertEqual(result['target'],2213.30)
+        self.assertTrue(any('stop-loss' in item for item in result['observations']))
+
+    def test_compact_split_chart_header_recovers_symbol_and_execution_interval(self):
+        document={'lines':[line('CAPLIPOINT',0.005,0.005),
+                           line('NSE1 @ 2407.50 15:59:21 125',0.005,0.30),
+                           line('H1-Y :2163.31',0.64,0.01),
+                           line('Entry: 2138.10 RR(2.53)',0.68,0.14),
+                           line('Stop:2108.40 Rs(-29.70)',0.75,0.14),
+                           line('T:2213.30 Rs(75.20)',0.55,0.74)]}
+        result=chart_ai.parse_chart(document)
+        self.assertEqual(result['symbol'],'CAPLIPOINT')
+        self.assertEqual(result['timeframe'],'125 min')
+        self.assertEqual(result['setup'],'YIT')
+        self.assertEqual(result['entry'],2138.10)
+        self.assertEqual(result['sl'],2108.40)
+        self.assertEqual(result['target'],2213.30)
+        self.assertTrue(result['usable'],result['warnings'])
+
+    @unittest.skipUnless(os.name=='nt' and RAPID_OCR_AVAILABLE,'Windows with local RapidOCR')
+    def test_trade_tiger_title_with_exchange_quote_clock_and_125_interval(self):
+        document={'lines':[line('CAPLIPOINT',0.005,0.005),
+                           line('NSEITS 1 @ 2407.50 15:59:21 125 min',0.005,0.30),
+                           line('H1-W :2062.92',0.64,0.01),
+                           line('Entry: 2015.40 RR(2.39)',0.68,0.14),
+                           line('Stop:1911.40 Rs(-104)',0.75,0.14),
+                           line('T:2263.50 Rs(248.1)',0.55,0.74)]}
+        result=chart_ai.parse_chart(document)
+        self.assertEqual(result['timeframe'],'125 min',result['rawText'])
+        self.assertEqual(result['timeframeLabel'],'125 min')
+        self.assertTrue(result['usable'],result['warnings'])
+
+    def test_small_compact_chart_title_is_found_by_enlarged_header_scan(self):
+        from PIL import Image, ImageDraw, ImageFont
+        import io
+        image=Image.new('RGB',(1920,1080),'aliceblue');draw=ImageDraw.Draw(image)
+        small=ImageFont.truetype('arial.ttf',9)
+        draw.text((4,2),'CAPLIPOINT NSE1 @2407.50 15:59:21 125',font=small,fill='black')
+        draw.text((580,500),'H1-Y :2163.31',font=small,fill='black')
+        draw.text((800,650),'Entry: 2138.10 RR(2.53)',font=small,fill='black')
+        draw.text((800,700),'Stop:2108.40 Rs(-29.70)',font=small,fill='red')
+        draw.text((1450,500),'T:2213.30 Rs(75.20)',font=small,fill='green')
+        stream=io.BytesIO();image.save(stream,format='PNG')
+        document=chart_ai.rapid_ocr(base64.b64encode(stream.getvalue()).decode())
+        result=chart_ai.parse_chart(document)
+        self.assertEqual(result['symbol'],'CAPLIPOINT',result['rawText'])
+        self.assertEqual(result['timeframe'],'125 min',result['rawText'])
+        self.assertTrue(result['usable'],(result['warnings'],result['rawText']))
+
     def test_trade_tiger_rr_annotation_identifies_entry_price(self):
         document={'lines':[line('POLYCAB[NSE - 9500] W',0.005,0.005),
                            line('H1-Q :7626.93',0.62,0.01),
@@ -149,7 +285,7 @@ class ChartReaderTests(unittest.TestCase):
             read.assert_not_called()
 
     def test_analysis_has_no_network_or_model_dependency(self):
-        with patch('chart_ai.native_ocr',return_value=cyient(True)) as read:
+        with patch('chart_ai.rapid_ocr',return_value=cyient(True)) as read:
             result=chart_ai.analyze({'image':base64.b64encode(b'\x89PNG\r\n\x1a\nfixture').decode()})
         self.assertTrue(result['localOnly']);self.assertTrue(result['analysis']['usable']);read.assert_called_once()
 

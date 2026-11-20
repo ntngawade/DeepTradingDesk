@@ -27,8 +27,9 @@
  async function checkReader(){
   $('aiCheck').disabled=true;
   try{
-   let data;if(!runtimeUsed&&runtimeInfo?.chartReader?.independent===true){data=runtimeInfo.chartReader;runtimeUsed=true;}else{runtimeUsed=true;data=await api('status?reader=2&check='+Date.now());}
+   let data;if(!runtimeUsed&&runtimeInfo?.chartReader?.independent===true&&Number(runtimeInfo.chartReader.apiVersion)>=9){data=runtimeInfo.chartReader;runtimeUsed=true;}else{runtimeUsed=true;data=await api('status?reader=9&check='+Date.now());}
    if(data.independent!==true)throw Error('This page reached an older chart-reader API. Open the updated application at http://127.0.0.1:8081.');
+   if(Number(data.apiVersion)<9)throw Error('Restart Deep Trading Desk to load the updated RapidOCR chart reader. No chart was analyzed with the old reader.');
    readerReady=!!data.connected;readerError=readerReady?'':data.message||'Built-in reader is unavailable.';
    $('aiRuntime').textContent=(data.message||'Reader checked.')+(runtimeInfo?.backendVersion?' Backend '+runtimeInfo.backendVersion+'.':'');
   }catch(error){readerReady=false;readerError=error.message;$('aiRuntime').textContent=error.message;}
@@ -50,7 +51,7 @@
   if(!a){$('aiOverlay').innerHTML='';$('aiReview').innerHTML=`<h3>${escape(item.name)}</h3><p class="hint">${escape(item.error||state(item))}</p><button type="button" class="primary" data-ai-action="retry" data-ai-id="${item.id}" ${item.status==='reading'?'disabled':''}>${item.error?'Retry analysis':'Analyze this chart'}</button><button type="button" data-ai-action="remove" data-ai-id="${item.id}">Remove chart</button>`;return;}
   const settings=TradeDeskData.settings(),sizing=valid(item)?TradeMath.calculate(a.entry,a.sl,a.target,settings):null;
   const field=(label,value)=>`<div class="ai-read-value"><small>${label}</small><b>${escape(value??'Not read')}</b></div>`;
-  $('aiReview').innerHTML=`${analysisMarkup(item)}<div class="actions"><button type="button" data-ai-action="edit" data-ai-id="${item.id}" ${item.saved||item.editing?'disabled':''}>Edit values and notes</button><button type="button" data-ai-action="resetEdits" data-ai-id="${item.id}" ${item.saved||item.editing||!(item.correctedFields?.length||item.defaultTarget)?'disabled':''}>Restore original reading</button></div>${correctionMarkup(item)}<h3>Values ready for Trade Plans</h3><div class="ai-review-grid">${field('Stock / script',a.symbol)}${field('Trade setup',a.setup)}${field('Execution timeframe',a.timeframe+(a.timeframeLabel?' / '+a.timeframeLabel:''))}${field('Entry',money(a.entry))}${field('Stop-loss',money(a.sl))}${field('Target',a.target?money(a.target):'Not marked / not read')}</div><p class="hint">Setup evidence: ${escape(a.evidence?.setup||'Not read')}. Target source: ${escape(a.targetSource||'missing')}.</p>${a.entry>a.sl&&a.sl>0?`<p class="hint">Reviewed price risk per share: ${money(a.entry-a.sl)}${a.target>a.entry?' / reward per share: '+money(a.target-a.entry):''}. Configured risk budget: ${money(settings.capital*settings.risk/100)} (${settings.risk}% of capital).</p>`:''}${a.canCalculateTarget&&!a.target&&!item.editing?`<p class="hint">A target was not marked. Default 1:${settings.rr} would give ${money(TradeMath.round(a.entry+(a.entry-a.sl)*settings.rr))}.</p><button type="button" data-ai-action="defaultTarget" data-ai-id="${item.id}">Use default 1:${settings.rr} target (calculated)</button>`:''}<h3>Notes captured from chart</h3><div class="ai-notes">${escape((a.notes||[]).join('\n')||'No chart note was read.')}</div>${sizing?`<p class="hint">Calculated quantity: ${sizing.qty} / R:R 1:${sizing.rr.toFixed(2)} / planned risk ${money(sizing.risk)} / potential profit ${money(sizing.profit)} before charges.</p>`:''}<h3>Original reader review notes</h3><ul class="ai-read-warnings">${(a.warnings||[]).map(text=>`<li>${escape(text)}</li>`).join('')}</ul>${item.error?`<p class="red">${escape(item.error)}</p>`:''}<label class="remember-option"><input type="checkbox" data-ai-action="check" data-ai-id="${item.id}" ${item.checked?'checked':''} ${!valid(item)||item.saved||item.editing?'disabled':''}> I checked this chart's stock, setup, timeframe, prices and notes.</label><div class="actions"><button class="primary" type="button" data-ai-action="add" data-ai-id="${item.id}" ${!valid(item)||!item.checked||item.saved||item.editing?'disabled':''}>${item.saved?'Added to Trade Plans':'Add checked trade plan'}</button><button type="button" data-ai-action="retry" data-ai-id="${item.id}" ${item.saved||item.status==='reading'?'disabled':''}>Read again</button><button type="button" data-ai-action="remove" data-ai-id="${item.id}">Remove chart</button></div><p class="hint">Only this reviewed setup is saved, with its captured notes. No entry is armed or executed.</p><details><summary>Recognized chart text / extraction evidence</summary><pre class="ai-ocr-text">${escape(a.rawText||'')}</pre></details>`;
+  $('aiReview').innerHTML=`${analysisMarkup(item)}<div class="actions"><button type="button" data-ai-action="edit" data-ai-id="${item.id}" ${item.saved||item.editing?'disabled':''}>Edit values and notes</button><button type="button" data-ai-action="resetEdits" data-ai-id="${item.id}" ${item.saved||item.editing||!(item.correctedFields?.length||item.defaultTarget)?'disabled':''}>Restore original reading</button></div>${correctionMarkup(item)}<h3>Values ready for Trade Plans</h3><div class="ai-review-grid">${field('Stock / script',a.symbol)}${field('Trade setup',a.setup)}${field('Execution timeframe',a.timeframe+(a.timeframeLabel?' / '+a.timeframeLabel:''))}${field('Entry',money(a.entry))}${field('Stop-loss',money(a.sl))}${field('Target',a.target?money(a.target):'Not marked / not read')}</div><p class="hint">Setup evidence: ${escape(a.evidence?.setup||'Not read')}. Target source: ${escape(a.targetSource||'missing')}.</p>${a.entry>a.sl&&a.sl>0?`<p class="hint">Reviewed price risk per share: ${money(a.entry-a.sl)}${a.target>a.entry?' / reward per share: '+money(a.target-a.entry):''}. Configured risk budget: ${money(settings.capital*settings.risk/100)} (${settings.risk}% of capital).</p>`:''}${a.canCalculateTarget&&!a.target&&!item.editing?`<p class="hint">A target was not marked. Default 1:${settings.rr} would give ${money(TradeMath.round(a.entry+(a.entry-a.sl)*settings.rr))}.</p><button type="button" data-ai-action="defaultTarget" data-ai-id="${item.id}">Use default 1:${settings.rr} target (calculated)</button>`:''}<h3>Notes captured from chart</h3><div class="ai-notes">${escape((a.notes||[]).join('\n')||'No chart note was read.')}</div>${sizing?`<p class="hint">Calculated quantity: ${sizing.qty} / R:R 1:${sizing.rr.toFixed(2)} / planned risk ${money(sizing.risk)} / potential profit ${money(sizing.profit)} before charges.</p>`:''}<h3>Original reader review notes</h3><ul class="ai-read-warnings">${(a.warnings||[]).map(text=>`<li>${escape(text)}</li>`).join('')}</ul>${item.error?`<p class="red">${escape(item.error)}</p>`:''}<label class="remember-option"><input type="checkbox" data-ai-action="check" data-ai-id="${item.id}" ${item.checked?'checked':''} ${!valid(item)||item.saved||item.editing?'disabled':''}> I checked this chart's stock, setup, timeframe, prices and notes.</label><div class="actions"><button class="primary" type="button" data-ai-action="add" data-ai-id="${item.id}" ${!valid(item)||!item.checked||item.saved||item.editing||item.saving?'disabled':''}>${item.saving?'Adding plan + sending...':item.telegramSent?'Plan added + Telegram sent':item.saved?'Plan added':'Add checked plan + send chart to Telegram'}</button>${item.saved&&!item.telegramSent&&!item.sendingTelegram&&item.reviewedPlan?`<button type="button" data-ai-action="retryTelegram" data-ai-id="${item.id}">Retry Telegram send</button>`:''}<button type="button" data-ai-action="retry" data-ai-id="${item.id}" ${item.saved||item.status==='reading'?'disabled':''}>Read again</button><button type="button" data-ai-action="remove" data-ai-id="${item.id}">Remove chart</button></div><p class="hint">Adding saves the reviewed setup to Trade Plans and sends this chart image plus its details to Telegram. It does not place or arm an order.</p><details><summary>Recognized chart text / extraction evidence</summary><pre class="ai-ocr-text">${escape(a.rawText||'')}</pre></details>`;
   draw(item);
  }
  function draw(item){
@@ -85,6 +86,7 @@
     try{
      const image=await fileData(item.file);if(!queue.includes(item))continue;
      const result=await api('analyze',{image});if(!queue.includes(item))continue;
+     if(Number(result.apiVersion)<9)throw Error('The running backend still has the old chart reader. Restart Deep Trading Desk, then retry; this chart was not reviewed with RapidOCR.');
      item.analysis=result.analysis;item.originalAnalysis=copy(result.analysis);item.correctedFields=[];item.editing=false;item.status='read';item.checked=false;
     }catch(error){if(queue.includes(item)){item.error=error.name==='TimeoutError'?'Chart reading timed out. Try a smaller image.':error.message;item.status='error';}}
     render();
@@ -92,15 +94,35 @@
    $('aiProgress').textContent='Chart reading finished. Check each result before adding it to Trade Plans.';
   }finally{processing=false;render();}
  }
- function add(item){
-  if(!item||!item.checked||item.saved||item.editing||!valid(item))return;
-  const a=item.analysis;
+ async function telegramSend(item){
+  if(!item?.saved||!item.reviewedPlan||item.telegramSent||item.sendingTelegram)return;
+  item.sendingTelegram=true;item.error=null;render();
+  try{
+   const statusResponse=await fetch('/api/telegram/status',{cache:'no-store'}),status=await statusResponse.json().catch(()=>null);
+   if(!statusResponse.ok||!status?.configured)throw Error(status?.error||'Telegram is not configured. Add the bot token and group chat ID in Settings, then retry.');
+   const p=item.reviewedPlan,esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+   const risk=p.qty*(p.entry-p.sl),profit=p.qty*(p.target-p.entry),rr=(p.target-p.entry)/(p.entry-p.sl);
+   const caption=`<b>NEW TRADE PLAN - ${esc(p.symbol)}</b>\n<b>Side:</b> BUY | <b>Product:</b> CNC Delivery\n<b>Setup:</b> ${esc(p.setup)} | <b>Execution:</b> ${esc(p.timeframe)}\n<b>Entry:</b> ${money(p.entry)}\n<b>Stop-loss:</b> ${money(p.sl)}\n<b>Target:</b> ${money(p.target)}\n<b>Quantity:</b> ${p.qty} shares\n<b>Planned risk:</b> ${money(risk)}\n<b>Potential profit:</b> ${money(profit)}\n<b>R:R:</b> 1:${Number.isFinite(rr)?rr.toFixed(2):'-'}${p.notes?`\n<b>Notes:</b> ${esc(p.notes).slice(0,250)}`:''}\n\n<i>Plan only - order not placed.</i>`;
+   const image=await fileData(item.file),response=await fetch('/api/telegram/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({caption,image,filename:item.file.name||`${p.symbol}-chart.png`}),cache:'no-store',signal:AbortSignal.timeout(30000)});
+   const result=await response.json().catch(()=>({error:'The app server returned an invalid Telegram response. Confirm Deep Trading Desk is running on port 8081.'}));
+   if(!response.ok)throw Error(result.error||'Telegram send failed.');
+   item.telegramSent=true;item.error=null;$('aiProgress').textContent=`${p.symbol}: plan saved and chart sent to the Telegram group.`;
+  }catch(error){item.error=`Plan saved, but Telegram message failed: ${error.message||error}. Use Retry Telegram send after fixing Telegram settings.`;$('aiProgress').textContent=item.error;}
+  finally{item.sendingTelegram=false;render();}
+ }
+ async function add(item){
+  if(!item||!item.checked||item.saved||item.saving||item.editing||!valid(item))return;
+  const a=item.analysis;item.saving=true;item.error=null;render();
   try{
    let notes=(a.notes||[]).join('\n');if(item.defaultTarget)notes+=(notes?'\n':'')+`Target calculated from default R:R 1:${item.defaultRR}; no target was marked on chart.`;
    if(!item.defaultTarget&&(item.correctedFields||[]).includes('target'))notes+=(notes?'\n':'')+'Target corrected by you during chart review.';
-   TradeDeskData.addChartPlan({symbol:a.symbol,setup:a.setup,timeframe:a.timeframe,entry:a.entry,sl:a.sl,target:a.target,notes});
-   item.saved=true;item.error=null;$('aiProgress').textContent=`${a.symbol} added to Trade Plans with its chart notes. No order armed.`;
-  }catch(error){item.error=error.message;}
+   const sizing=TradeMath.calculate(a.entry,a.sl,a.target,TradeDeskData.settings());
+   const input={symbol:a.symbol,setup:a.setup,timeframe:a.timeframe,entry:a.entry,sl:a.sl,target:a.target,notes};
+   const id=TradeDeskData.addChartPlan(input);
+   item.saved=true;item.checked=false;item.reviewedPlan={...input,qty:sizing.qty,id};
+   $('aiProgress').textContent=`${a.symbol} saved to Trade Plans. Sending the reviewed chart to Telegram...`;await telegramSend(item);
+  }catch(error){item.error=error.message;$('aiProgress').textContent=error.message;}
+  finally{item.saving=false;render();}
  }
  document.addEventListener('click',async event=>{
   const button=event.target.closest('[data-ai-action]');if(!button||button.dataset.aiAction==='check')return;
@@ -111,7 +133,8 @@
   if(action==='cancelEdit'){item.draft=null;item.editing=false;item.checked=false;}
   if(action==='resetEdits'&&!item.saved&&!item.editing&&item.originalAnalysis){item.analysis=copy(item.originalAnalysis);item.correctedFields=[];item.defaultTarget=false;item.checked=false;item.error=null;}
   if(action==='defaultTarget'&&!item.editing&&!item.saved&&item.analysis?.canCalculateTarget&&!item.analysis.target){const a=item.analysis;item.defaultRR=TradeDeskData.settings().rr;a.target=TradeMath.round(a.entry+(a.entry-a.sl)*item.defaultRR);a.targetSource=`Calculated at default 1:${item.defaultRR}; not read from chart`;item.defaultTarget=true;item.checked=false;}
-  if(action==='add')add(item);
+  if(action==='add')await add(item);
+  if(action==='retryTelegram')await telegramSend(item);
   if(action==='retry'&&!item.saved&&item.status!=='reading'){item.status='queued';item.analysis=null;item.error=null;item.checked=false;item.editing=false;item.draft=null;item.defaultTarget=false;render();await pump();}
   if(action==='remove'){URL.revokeObjectURL(item.url);queue=queue.filter(row=>row!==item);if(selected===item.id)selected=queue[0]?.id||null;}
   render();
@@ -163,7 +186,7 @@
  $('aiPasteZone').addEventListener('dragover',event=>event.preventDefault());
  $('aiPasteZone').addEventListener('drop',async event=>{event.preventDefault();await enqueue(event.dataTransfer?.files);});
  $('aiClear').onclick=()=>{for(const item of queue)URL.revokeObjectURL(item.url);queue=[];selected=null;$('aiProgress').textContent='Chart queue cleared.';render();};
- $('aiAddAll').onclick=()=>{for(const item of queue)if(item.checked&&!item.saved)add(item);render();};
+ $('aiAddAll').onclick=async()=>{for(const item of queue)if(item.checked&&!item.saved)await add(item);render();};
  $('aiCheck').onclick=async()=>{if(queue.some(item=>['queued','blocked'].includes(item.status)))return resumePending();readerReady=null;await checkReader();};
  $('aiAnalyzeAll').onclick=async()=>{for(const item of queue)if(item.status==='error'&&!item.analysis){item.status='queued';item.error=null;}await resumePending();};
  if(typeof setInterval==='function')setInterval(()=>{if(!document.hidden&&queue.some(item=>['queued','blocked'].includes(item.status)))resumePending();},15000);

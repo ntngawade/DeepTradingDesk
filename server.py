@@ -4,6 +4,7 @@ import io
 import json
 import hmac
 import os
+import base64
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import xml.etree.ElementTree as ET
@@ -20,6 +21,7 @@ from live_engine import LiveEngine
 from live_broker import DhanLiveBroker
 from secret_store import SecretStore
 import chart_ai
+from telegram_share import TelegramShare
 from urllib.parse import urlsplit
 from datetime import datetime, timezone
 from urllib.request import Request, build_opener, HTTPRedirectHandler
@@ -63,7 +65,7 @@ def dhan_profile(token):
 
 def dhan_read(token, client_id, path, payload=None):
     """Only these read-only APIs are permitted; POST is used for quote retrieval."""
-    if path not in ('/marketfeed/ltp', '/holdings', '/positions') and not (re.fullmatch(r'/trades/[A-Za-z0-9_-]{1,80}', path) or re.fullmatch(r'/trades/\d{4}-\d{2}-\d{2}/\d{4}-\d{2}-\d{2}/\d{1,3}', path)):
+    if path not in ('/marketfeed/ltp', '/marketfeed/ohlc', '/holdings', '/positions') and not (re.fullmatch(r'/trades/[A-Za-z0-9_-]{1,80}', path) or re.fullmatch(r'/trades/\d{4}-\d{2}-\d{2}/\d{4}-\d{2}-\d{2}/\d{1,3}', path)):
         raise ConnectionError('Unsupported read-only Dhan API.')
     request = Request('https://api.dhan.co/v2' + path,
                       headers={'access-token': token, 'client-id': client_id,
@@ -76,16 +78,16 @@ def dhan_read(token, client_id, path, payload=None):
         code = error.code
         error.close()
         if code == 401:
-            if path == '/marketfeed/ltp':
+            if path in ('/marketfeed/ltp', '/marketfeed/ohlc'):
                 raise ConnectionError('Dhan denied market-data access (HTTP 401). A connected Trading API account does not grant CMP access. Check Data API subscription and token permissions; portfolio access may still work.') from None
             raise ConnectionError('Dhan rejected the session. Update your access token in Settings.') from None
         if code == 403:
-            if path == '/marketfeed/ltp':
+            if path in ('/marketfeed/ltp', '/marketfeed/ohlc'):
                 raise ConnectionError('Dhan denied CMP access (HTTP 403). The free Trading API plan does not include market quotes. Check or activate Data API access in Dhan; your trading-account connection can still be valid.') from None
             raise ConnectionError('Dhan denied portfolio access. Check your token and Trading API permissions.') from None
         if code == 429:
             raise ConnectionError('Dhan rate limit reached. Wait before refreshing.') from None
-        if path == '/marketfeed/ltp':
+        if path in ('/marketfeed/ltp', '/marketfeed/ohlc'):
             if code in (500, 502, 503, 504):
                 raise ConnectionError(f'Dhan market-data service is temporarily unavailable (HTTP {code}). Retry CMP refresh shortly; this is not a sell-order-ID issue.') from None
             raise ConnectionError(f'Dhan market-data request failed (HTTP {code}). Check Data API access and retry CMP refresh.') from None
@@ -260,7 +262,7 @@ class DhanSession:
             elapsed = time.monotonic() - self.quote_time
             if mapping and self.quote_time and elapsed < 1.05:
                 time.sleep(1.05 - elapsed)
-            data = dhan_read(self.token, self.profile['dhanClientId'], '/marketfeed/ltp',
+            data = dhan_read(self.token, self.profile['dhanClientId'], '/marketfeed/ohlc',
                              {'NSE_EQ': sorted(set(mapping.values()))}) if mapping else {}
             if not isinstance(data, dict) or not isinstance(data.get('data', {}), dict):
                 raise ConnectionError('Dhan returned an invalid market-data response.')
@@ -272,8 +274,12 @@ class DhanSession:
             for symbol, security_id in mapping.items():
                 quote = prices.get(str(security_id), {})
                 price = quote.get('last_price') if isinstance(quote, dict) else None
+                ohlc = quote.get('ohlc') if isinstance(quote, dict) else None
+                previous_close = ohlc.get('close') if isinstance(ohlc, dict) else None
                 if isinstance(price, (int, float)) and math.isfinite(price) and price > 0:
                     quotes[symbol] = {'price': price, 'securityId': str(security_id),
+                                      'previousClose': previous_close if isinstance(previous_close, (int, float)) and math.isfinite(previous_close) and previous_close > 0 else None,
+                                      'dayChange': price - previous_close if isinstance(previous_close, (int, float)) and math.isfinite(previous_close) and previous_close > 0 else None,
                                       'source': 'Dhan', 'fetchedAt': fetched}
             result = {'quotes': quotes, 'unresolved': [s for s in symbols if s not in mapping],
                       'missing': [s for s in mapping if s not in quotes],
@@ -367,6 +373,7 @@ class DhanSession:
 
 
 DHAN = DhanSession(SecretStore(ROOT / 'runtime' / 'dhan-session.bin'))
+TELEGRAM = TelegramShare(ROOT / 'runtime' / 'telegram.bin')
 LIVE = None
 
 
@@ -501,6 +508,12 @@ class Handler(SimpleHTTPRequestHandler):
             self.json_response({'application': 'DeepTradingDesk', 'backendVersion': APP_VERSION, 'workspace': str(ROOT)})
         elif self.path == '/api/dhan/status':
             self.json_response(DHAN.status())
+        elif self.path == '/api/telegram/status':
+            try:
+                self.json_response(TELEGRAM.status())
+            except (ValueError, OSError) as error:
+                self.json_response({'configured': False, 'chatId': '', 'tokenSaved': False,
+                                    'error': str(error)[:240]})
         elif urlsplit(self.path).path == '/api/chart-ai/status':
             self.json_response(chart_ai.status())
         elif self.path == '/api/dhan/portfolio':
@@ -546,6 +559,36 @@ class Handler(SimpleHTTPRequestHandler):
                 if not 0 < size <= 7_100_000:
                     raise ValueError('Chart request is too large. Use an image under 5 MB.')
                 self.json_response(chart_ai.analyze(json.loads(self.rfile.read(size))))
+            except (ValueError, TypeError) as error:
+                self.json_response({'error': str(error)}, 400)
+            return
+        if self.path in ('/api/telegram/config', '/api/telegram/send', '/api/telegram/find-chat', '/api/telegram/check'):
+            try:
+                if self.path == '/api/telegram/find-chat':
+                    self.json_response(TELEGRAM.find_chats())
+                    return
+                if self.path == '/api/telegram/check':
+                    self.json_response(TELEGRAM.check())
+                    return
+                if self.headers.get('Content-Type', '').split(';')[0] != 'application/json':
+                    self.json_response({'error': 'JSON body required.'}, 415)
+                    return
+                size = int(self.headers.get('Content-Length', 0))
+                maximum = 7_100_000 if self.path.endswith('/send') else 20_000
+                if not 0 < size <= maximum:
+                    raise ValueError('Telegram request is too large.')
+                body = json.loads(self.rfile.read(size))
+                if not isinstance(body, dict):
+                    raise ValueError('Invalid Telegram request.')
+                if self.path.endswith('/config'):
+                    result = TELEGRAM.configure(body.get('botToken'), body.get('chatId'))
+                else:
+                    encoded = body.get('image')
+                    if not isinstance(encoded, str) or len(encoded) > 6_700_000:
+                        raise ValueError('Attach a chart screenshot under 5 MB.')
+                    image = base64.b64decode(encoded, validate=True)
+                    result = TELEGRAM.send_photo(body.get('caption'), image, body.get('filename', 'chart.png'))
+                self.json_response(result)
             except (ValueError, TypeError) as error:
                 self.json_response({'error': str(error)}, 400)
             return
@@ -642,7 +685,7 @@ class Handler(SimpleHTTPRequestHandler):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Deep Trading Desk application backend')
-    parser.add_argument('--port', type=int, default=8080)
+    parser.add_argument('--port', type=int, default=8081)
     parser.add_argument('--host', default=os.environ.get('DESK_BIND_HOST', '127.0.0.1'))
     args = parser.parse_args()
     try:

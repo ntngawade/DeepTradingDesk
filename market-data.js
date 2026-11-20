@@ -4,6 +4,11 @@
  let connected=false,busy=false,generation=0;
  const message=text=>$('marketStatus').textContent=text;
  function feed(text,connected=false){$('feedHealth').textContent=text;$('feedHealth').className='feed-chip'+(connected?' connected':'');}
+ function inAutoRefreshWindow(){
+  const parts=Object.fromEntries(new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Kolkata',weekday:'short',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(new Date()).map(part=>[part.type,part.value]));
+  const minutes=Number(parts.hour)*60+Number(parts.minute);
+  return !['Sat','Sun'].includes(parts.weekday)&&minutes>=540&&minutes<960;
+ }
  async function refresh(){
   if(busy)return;
   if(!connected){message('Connect Dhan in Settings to load CMP. Excel CMP is not used as a live price.');return;}
@@ -28,8 +33,9 @@
   }catch(error){if(requestGeneration===generation){const text=error.name==='TimeoutError'?'Dhan CMP request timed out. Retry Refresh Dhan CMP.':error.message;TradeDeskData.clearQuotes(text);message(text);feed('FEED UNAVAILABLE');}}
   finally{busy=false;$('refreshPrices').disabled=false;}
  }
- globalThis.TradeDeskMarket={setConnection(value){const changed=connected!==value;connected=value;if(changed){generation++;if(connected)refresh();else{TradeDeskData.clearQuotes('Dhan disconnected');message('Dhan disconnected. Connect in Settings to fetch CMP.');feed('DHAN DISCONNECTED');}}},refresh};
+ globalThis.TradeDeskMarket={setConnection(value){const changed=connected!==value;connected=value;if(changed){generation++;if(connected){if(inAutoRefreshWindow())refresh();else message('Automatic CMP refresh runs weekdays, 9:00 AM–4:00 PM IST, every 30 seconds.');}else{TradeDeskData.clearQuotes('Dhan disconnected');message('Dhan disconnected. Connect in Settings to fetch CMP.');feed('DHAN DISCONNECTED');}}},refresh};
  $('refreshPrices').onclick=refresh;
- setInterval(()=>{if(!document.hidden)refresh();},30000);
- document.addEventListener('visibilitychange',()=>{if(!document.hidden&&connected)refresh();});
+ setInterval(()=>{if(!document.hidden&&connected&&inAutoRefreshWindow())refresh();},30000);
+ document.addEventListener('visibilitychange',()=>{if(!document.hidden&&connected&&inAutoRefreshWindow())refresh();});
+ message('Connect Dhan; automatic CMP refresh runs weekdays, 9:00 AM–4:00 PM IST, every 30 seconds.');
 })();

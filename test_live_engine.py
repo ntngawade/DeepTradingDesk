@@ -4,7 +4,7 @@ import unittest
 import threading
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from live_engine import LiveEngine, normalize_plan, entry_touched
+from live_engine import LiveEngine, normalize_plan
 
 
 SETTINGS = {'capital': 500000, 'risk': 1}
@@ -102,29 +102,16 @@ class LiveEngineTests(unittest.TestCase):
         for quantity in (251,0,1.5,True):
             with self.assertRaises(ValueError):
                 normalize_plan({**PLAN,'qtyMode':'manual','qty':quantity},SETTINGS,instrument)
-    def test_proximity_is_not_entry_and_crossing_works_from_either_side(self):
-        stamp = datetime.now(timezone.utc)
-        record = {'entry': 1000}
-        self.assertFalse(entry_touched(record, 999, stamp.isoformat()))
-        self.assertFalse(entry_touched(record, 1001, stamp.isoformat()))
-        self.assertTrue(entry_touched(record, 1000, stamp.isoformat()))
-        record.update(lastCmp=1001, lastCmpAt=(stamp-timedelta(seconds=5)).isoformat())
-        self.assertTrue(entry_touched(record, 999, stamp.isoformat()))
-        self.assertFalse(entry_touched(record, 1000.5, stamp.isoformat()))
-        record['lastCmp'] = 999
-        self.assertTrue(entry_touched(record, 1001, stamp.isoformat()))
-        record['lastCmpAt'] = (stamp-timedelta(minutes=2)).isoformat()
-        self.assertFalse(entry_touched(record, 1001, stamp.isoformat()))
-
-    def test_initial_price_below_entry_does_not_buy_immediately(self):
+    def test_cmp_touch_entry_within_one_percent_sends_once(self):
         self.arm()
         self.broker.price = 999
         self.engine.cycle()
-        self.assertFalse(self.broker.sent)
+        self.assertEqual(len(self.broker.sent), 1)
+        self.assertEqual(self.record()['state'], 'ENTRY_PENDING')
+        self.assertEqual(self.broker.sent[0]['entry'], 1000)
         self.broker.price = 1000
         self.engine.cycle()
         self.assertEqual(len(self.broker.sent), 1)
-        self.assertEqual(self.broker.sent[0]['entry'], 1000)
 
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -145,21 +132,25 @@ class LiveEngineTests(unittest.TestCase):
     def record(self):
         return self.engine.records('123')[0]
 
-    def test_one_percent_limit_entry_partial_fills_protection_and_actual_exit(self):
+    def test_one_percent_entry_touch_market_order_partial_fills_protection_and_actual_exit(self):
         review = self.arm()
         self.assertEqual(review['quantity'], 250)
         self.broker.price = 1020
         self.engine.cycle()
         self.assertEqual(len(self.broker.sent), 0)
-        self.broker.price = 1010  # 1% is preparation only.
+        self.broker.price = 1010  # Entering the band alone does not submit before Entry is touched.
         self.engine.cycle()
         self.assertEqual(len(self.broker.sent), 0)
-        self.broker.price = 1000  # Touch planned entry.
+        self.broker.price = 1000  # Touching Entry submits one market Super Order.
         self.engine.cycle()
         self.assertEqual(len(self.broker.sent), 1)
         self.assertEqual(self.record()['state'], 'ENTRY_PENDING')
         self.assertEqual(self.broker.sent[0]['entry'], 1000)
+        self.assertEqual(self.broker.sent[0]['orderType'], 'MARKET')
         self.assertLessEqual(len(self.record()['correlationId']), 30)
+        self.broker.price = 1000  # A later quote cannot submit a duplicate order.
+        self.engine.cycle()
+        self.assertEqual(len(self.broker.sent), 1)
         self.broker.book[0].update(filledQty=100, averageTradedPrice=999, orderStatus='PART_TRADED')
         self.engine.cycle()
         self.assertEqual(self.record()['state'], 'PART_FILLED')
@@ -214,6 +205,21 @@ class LiveEngineTests(unittest.TestCase):
         self.engine.cycle()
         self.assertEqual(self.record()['state'], 'ENTRY_PENDING')
         self.assertEqual(len(self.broker.sent), 1)
+
+    def test_old_super_order_with_verified_historical_exit_is_closed(self):
+        self.arm()
+        self.engine.cycle()
+        record=self.record()
+        record.update(state='ACTION_REQUIRED',filledQty=250,averageFillPrice=1000,orderId='ORDER1',
+                      submittedAt='2026-11-16T04:00:00+00:00',brokerLegs=[{'orderId':'SELL1'}])
+        self.engine._write('123',record)
+        self.broker.book.clear()
+        self.broker.exit={'quantity':250,'price':960,'entryTradeAt':'2026-11-16 09:20:00','exitTradeAt':'2026-11-16 10:05:00'}
+        self.engine.reconcile('123',[self.record()])
+        self.assertEqual(self.record()['state'],'CLOSED')
+        self.assertEqual(self.record()['exitPrice'],960)
+        self.assertEqual(self.record()['closedQuantity'],250)
+        self.assertEqual(self.record()['exitTradeAt'],'2026-11-16 10:05:00')
 
     def test_restart_during_submission_is_never_resubmitted(self):
         self.arm()
