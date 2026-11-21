@@ -99,7 +99,7 @@
   item.sendingTelegram=true;item.error=null;render();
   try{
    const statusResponse=await fetch('/api/telegram/status',{cache:'no-store'}),status=await statusResponse.json().catch(()=>null);
-   if(!statusResponse.ok||!status?.configured)throw Error(status?.error||'Telegram is not configured. Add the bot token and group chat ID in Settings, then retry.');
+   if(!statusResponse.ok||!status?.configured)throw Error(status?.error||(status?.tokenSaved?'Your bot token is already saved. The Telegram group ID is missing. In Settings, send a new message in your group that mentions the bot, then click Find group ID once; it will save the group automatically. You will not need to re-enter the token.':'Telegram is not configured. Enter the bot token and group ID once in Settings.'));
    const p=item.reviewedPlan,esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
    const risk=p.qty*(p.entry-p.sl),profit=p.qty*(p.target-p.entry),rr=(p.target-p.entry)/(p.entry-p.sl);
    const caption=`<b>NEW TRADE PLAN - ${esc(p.symbol)}</b>\n<b>Side:</b> BUY | <b>Product:</b> CNC Delivery\n<b>Setup:</b> ${esc(p.setup)} | <b>Execution:</b> ${esc(p.timeframe)}\n<b>Entry:</b> ${money(p.entry)}\n<b>Stop-loss:</b> ${money(p.sl)}\n<b>Target:</b> ${money(p.target)}\n<b>Quantity:</b> ${p.qty} shares\n<b>Planned risk:</b> ${money(risk)}\n<b>Potential profit:</b> ${money(profit)}\n<b>R:R:</b> 1:${Number.isFinite(rr)?rr.toFixed(2):'-'}${p.notes?`\n<b>Notes:</b> ${esc(p.notes).slice(0,250)}`:''}\n\n<i>Plan only - order not placed.</i>`;
@@ -107,7 +107,7 @@
    const result=await response.json().catch(()=>({error:'The app server returned an invalid Telegram response. Confirm Deep Trading Desk is running on port 8081.'}));
    if(!response.ok)throw Error(result.error||'Telegram send failed.');
    item.telegramSent=true;item.error=null;$('aiProgress').textContent=`${p.symbol}: plan saved and chart sent to the Telegram group.`;
-  }catch(error){item.error=`Plan saved, but Telegram message failed: ${error.message||error}. Use Retry Telegram send after fixing Telegram settings.`;$('aiProgress').textContent=item.error;}
+  }catch(error){item.error=`Plan saved, but Telegram message failed: ${error.message||error}. After Telegram shows ready in Settings, click Retry Telegram send.`;$('aiProgress').textContent=item.error;}
   finally{item.sendingTelegram=false;render();}
  }
  async function add(item){
