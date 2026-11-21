@@ -43,7 +43,7 @@ const sectorIndexHints={
  'NIFTYFINSERVICE':'ABCAPITAL ANGELONE BAJAJFINSV BAJFINANCE BAJAJHFL CHOLAFIN HDFCAMC HDFCLIFE ICICIGI ICICIPRULI JIOFIN LICHSGFIN M&MFIN MANAPPURAM MUTHOOTFIN SBICARD SBILIFE SHRIRAMFIN',
  'NIFTYCONSRDURBL':'AMBER BLUESTARCO CROMPTON DIXON HAVELLS VOLTAS WHIRLPOOL'
 };
-function sectorIndexFor(symbol){const key=String(symbol||'').trim().toUpperCase(),csvSectors=window.DEEP_TRADE_SECTOR_MAP?.symbols?.[key];if(Array.isArray(csvSectors)&&csvSectors.length)return csvSectors[0];for(const [index,symbols] of Object.entries(sectorIndexHints))if(symbols.split(' ').includes(key))return index;return '';}
+function sectorIndexFor(symbol){const key=String(symbol||'').trim().toUpperCase(),csvSectors=window.DEEP_TRADE_SECTOR_MAP?.symbols?.[key];if(Array.isArray(csvSectors)&&csvSectors.length)return csvSectors[0];for(const [index,symbols] of Object.entries(sectorIndexHints))if(symbols.split(' ').includes(key))return index;return key?'NIFTY500':'';}
 function normalizeSectorIndex(value){const key=String(value||'').trim().toUpperCase().replace(/[^A-Z0-9]/g,'');return ({NIFTYFINANCIALSERVICES:'NIFTYFINSERVICE',NIFTYFINSERVICE:'NIFTYFINSERVICE',NIFTYOILGAS:'NIFTYOILANDGAS',NIFTYOILANDGAS:'NIFTYOILANDGAS',NIFTYCONSUMERDURABLES:'NIFTYCONSRDURBL',NIFTYCONSRDURBL:'NIFTYCONSRDURBL',NIFTYBANK:'NIFTYBANK',NIFTYIT:'NIFTYIT',NIFTYAUTO:'NIFTYAUTO',NIFTYFMCG:'NIFTYFMCG',NIFTYHEALTHCARE:'NIFTYHEALTHCARE',NIFTYMETAL:'NIFTYMETAL',NIFTYMEDIA:'NIFTYMEDIA',NIFTYPHARMA:'NIFTYPHARMA',NIFTYPRIVATEBANK:'NIFTYPRIVATEBANK',NIFTYPSUBANK:'NIFTYPSUBANK',NIFTYREALTY:'NIFTYREALTY'})[key]||String(value||'').trim().toUpperCase();}
 let autoSectorSuggestion='';
 const defaultSettings = {capital:500000,risk:1,rr:2,zone:7,gap:0.5,deliveryBrokerage:0};
