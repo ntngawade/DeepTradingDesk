@@ -206,6 +206,64 @@ html[data-theme=light] .holding-pnl-value.profit{color:#076c4d;background:#def4e
 html[data-theme=light] .holding-pnl-value.loss{color:#a7233c;background:#ffeaee;border-color:#eab7c1;text-shadow:none}
 html[data-theme=light] .holding-pnl-value.unknown{color:#64748b;background:#eef2f6;border-color:#d7e0e9}
 .tile-sector{color:#87a2c1!important;font-weight:600}html[data-theme=light] .tile-sector{color:#617a96!important}.holding-sort{background:transparent;color:inherit;padding:2px 4px;border-radius:3px;font:inherit;letter-spacing:inherit;text-transform:inherit;white-space:nowrap}.holding-sort:hover,.holding-sort[aria-pressed="true"]{color:var(--blue);background:transparent;filter:none}.holding-sort:focus-visible{outline:2px solid var(--blue);outline-offset:2px}</style>
+<style id="cabinet-polish">
+/* Personal trading cabinet: clearer hierarchy, active states and market surfaces. */
+:root{--green:#20c997;--red:#f16d82;--blue:#72a7ff;--border:#283952;--muted:#92a4bd}
+body{background:radial-gradient(ellipse at 78% -12%,#20345480,transparent 43%),linear-gradient(180deg,#0a1220,#080e18 70%);letter-spacing:.01em}
+.shell{max-width:1840px;width:calc(100% - 48px)}
+header{position:relative;margin:16px 0 12px;padding:18px 20px;border:1px solid #263852;border-radius:16px;background:linear-gradient(115deg,#101c2c,#111d2e 58%,#14243a);box-shadow:0 14px 34px #02071170}
+.brand .logo{border-radius:13px;box-shadow:0 0 0 5px #37d6b315,0 8px 24px #20c99720}
+.desk-time b{font-variant-numeric:tabular-nums}
+.notice{border-radius:11px;box-shadow:inset 0 1px #ffffff08}
+nav{align-items:center;gap:4px;padding:5px;margin:0 0 12px;border:1px solid #23344c;border-radius:13px;background:#0e1827;box-shadow:0 8px 24px #02071130}
+nav button{border:1px solid transparent;border-radius:9px;padding:11px 14px;transition:color .16s,background .16s,border-color .16s,transform .16s}
+nav button.active{border:1px solid #2a554e;background:linear-gradient(135deg,#163a35,#142a31);box-shadow:inset 0 1px #9affdf12,0 4px 14px #02071130}
+nav button:hover{transform:translateY(-1px)}
+.workspace-caption{padding:4px 2px;letter-spacing:1.35px}
+.workspace-title{margin:17px 0 14px}
+.workspace-title h2{font-size:29px;letter-spacing:-1.1px}
+.workspace-title>div>p:last-child{max-width:740px}
+.radar-strip{border-radius:12px;background:linear-gradient(110deg,#101d2e,#111d2e);box-shadow:inset 0 1px #ffffff06}
+.stat,.panel,.card{border-radius:14px;box-shadow:0 8px 24px #03091432}
+.stat{border-top:2px solid #314561}
+.stat strong{font-variant-numeric:tabular-nums}
+.panel{background:linear-gradient(145deg,#121e2f,#101a29 78%);border-color:#293a52}
+.panel h2{letter-spacing:-.25px}
+#dashboard .radar-tile{border-radius:14px;box-shadow:0 8px 22px #03091430;transition:transform .18s,border-color .18s,box-shadow .18s}
+#dashboard .radar-tile:hover{transform:translateY(-2px);box-shadow:0 14px 28px #03091455}
+#dashboard .radar-tile.ready{box-shadow:inset 0 0 0 1px #35d3a51c,0 8px 22px #03091430}
+#dashboard .radar-tile.near{box-shadow:inset 0 0 0 1px #efbd5b20,0 8px 22px #03091430}
+.tile-cmp b,.instrument-price b,.ticket-levels b{font-variant-numeric:tabular-nums;letter-spacing:-.35px}
+.controls{padding:10px;border:1px solid #25364e;border-radius:12px;background:#0e1827}
+.controls input,.controls select{border-radius:8px}
+input,select{transition:border-color .16s,box-shadow .16s}
+input:focus,select:focus{box-shadow:0 0 0 3px #39d6ae20}
+button{box-shadow:0 1px #ffffff08;transition:transform .16s,background .16s,border-color .16s,box-shadow .16s}
+button:hover{transform:translateY(-1px)}button.primary{box-shadow:0 5px 15px #20c99720}
+button:active{transform:translateY(0)}
+.tablewrap{border:1px solid #263852;border-radius:12px;background:#0e1827}
+table{font-variant-numeric:tabular-nums}
+th{position:sticky;top:0;z-index:1;background:#152237}
+th,td{padding-top:12px;padding-bottom:12px}
+tbody tr{transition:background .12s}
+tbody tr:hover{background:#ffffff06}
+.empty{border-radius:10px}
+.toast{backdrop-filter:blur(14px);border:1px solid #4a6a64;box-shadow:0 16px 44px #0008}
+@media(max-width:760px){.shell{width:calc(100% - 24px)}header{padding:14px;border-radius:12px}.workspace-title h2{font-size:24px}nav{border-radius:10px}nav button{padding:10px 11px}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition:none!important;animation:none!important}}
+html[data-theme="light"] body{background:radial-gradient(ellipse at 85% -10%,#dceafa 0,transparent 40%),#f1f5fa}
+html[data-theme="light"] header{background:linear-gradient(115deg,#fff,#f4f8fc);border-color:#d8e2ee;box-shadow:0 12px 32px #2f4a6810}
+html[data-theme="light"] nav{background:#fff;border-color:#d8e2ee;box-shadow:0 6px 18px #2f4a680c}
+html[data-theme="light"] nav button.active{background:linear-gradient(135deg,#e5f5ef,#edf5f7);border-color:#c8e6dc;box-shadow:inset 0 1px #fff}
+html[data-theme="light"] .radar-strip{background:linear-gradient(110deg,#fff,#f5f8fc);box-shadow:0 3px 12px #34506d08}
+html[data-theme="light"] .panel,html[data-theme="light"] .stat{box-shadow:0 7px 22px #34506d0d}
+html[data-theme="light"] #dashboard .radar-tile{box-shadow:0 6px 16px #34506d0c}
+html[data-theme="light"] #dashboard .radar-tile:hover{box-shadow:0 12px 24px #34506d18}
+html[data-theme="light"] .controls,html[data-theme="light"] .tablewrap{background:#fff;border-color:#d6e1ed}
+html[data-theme="light"] th{background:#eaf0f7}
+html[data-theme="light"] tbody tr:hover{background:#f1f6fc}
+html[data-theme="light"] .toast{box-shadow:0 14px 36px #20385125}
+</style>
 </head>
 <body><main class="shell">
 <header><div class="brand"><div class="logo">D<span>TD</span></div><div><h1>Deep Trading Desk<span class="green">.</span></h1><small>YOUR PERSONAL EXECUTION TERMINAL</small></div></div><div class="row header-controls"><div class="desk-time"><small>DESK TIME / IST</small><b id="deskClock">--:--:--</b></div><span id="tradingModeBadge" class="pill paper">â— PAPER MODE</span><span id="dhanBadge" class="pill status">Dhan Â· Not connected</span><button id="themeToggle" type="button">Dark theme</button><button id="pause">Pause new entries</button></div></header>
