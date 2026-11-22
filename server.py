@@ -16,7 +16,7 @@ import math
 from html import escape as escape_html
 from app_version import APP_VERSION
 import time
-from dhan_data import InstrumentDirectory, validate_symbols, executed_sale
+from dhan_data import InstrumentDirectory, validate_symbols, validate_indices, executed_sale
 from live_engine import LiveEngine
 from live_broker import DhanLiveBroker
 from secret_store import SecretStore
@@ -65,7 +65,7 @@ def dhan_profile(token):
 
 def dhan_read(token, client_id, path, payload=None):
     """Only these read-only APIs are permitted; POST is used for quote retrieval."""
-    if path not in ('/marketfeed/ltp', '/marketfeed/ohlc', '/holdings', '/positions') and not (re.fullmatch(r'/trades/[A-Za-z0-9_-]{1,80}', path) or re.fullmatch(r'/trades/\d{4}-\d{2}-\d{2}/\d{4}-\d{2}-\d{2}/\d{1,3}', path)):
+    if path not in ('/marketfeed/ltp', '/marketfeed/ohlc', '/marketfeed/quote', '/holdings', '/positions') and not (re.fullmatch(r'/trades/[A-Za-z0-9_-]{1,80}', path) or re.fullmatch(r'/trades/\d{4}-\d{2}-\d{2}/\d{4}-\d{2}-\d{2}/\d{1,3}', path)):
         raise ConnectionError('Unsupported read-only Dhan API.')
     request = Request('https://api.dhan.co/v2' + path,
                       headers={'access-token': token, 'client-id': client_id,
@@ -78,16 +78,16 @@ def dhan_read(token, client_id, path, payload=None):
         code = error.code
         error.close()
         if code == 401:
-            if path in ('/marketfeed/ltp', '/marketfeed/ohlc'):
+            if path in ('/marketfeed/ltp', '/marketfeed/ohlc', '/marketfeed/quote'):
                 raise ConnectionError('Dhan denied market-data access (HTTP 401). A connected Trading API account does not grant CMP access. Check Data API subscription and token permissions; portfolio access may still work.') from None
             raise ConnectionError('Dhan rejected the session. Update your access token in Settings.') from None
         if code == 403:
-            if path in ('/marketfeed/ltp', '/marketfeed/ohlc'):
+            if path in ('/marketfeed/ltp', '/marketfeed/ohlc', '/marketfeed/quote'):
                 raise ConnectionError('Dhan denied CMP access (HTTP 403). The free Trading API plan does not include market quotes. Check or activate Data API access in Dhan; your trading-account connection can still be valid.') from None
             raise ConnectionError('Dhan denied portfolio access. Check your token and Trading API permissions.') from None
         if code == 429:
             raise ConnectionError('Dhan rate limit reached. Wait before refreshing.') from None
-        if path in ('/marketfeed/ltp', '/marketfeed/ohlc'):
+        if path in ('/marketfeed/ltp', '/marketfeed/ohlc', '/marketfeed/quote'):
             if code in (500, 502, 503, 504):
                 raise ConnectionError(f'Dhan market-data service is temporarily unavailable (HTTP {code}). Retry CMP refresh shortly; this is not a sell-order-ID issue.') from None
             raise ConnectionError(f'Dhan market-data request failed (HTTP {code}). Check Data API access and retry CMP refresh.') from None
@@ -244,8 +244,9 @@ class DhanSession:
             self.portfolio_cache, self.portfolio_time = result, time.monotonic()
             return result
 
-    def quotes(self, symbols):
-        symbols = validate_symbols(symbols)
+    def quotes(self, symbols, indices=None):
+        symbols = validate_symbols(symbols) if symbols else []
+        indices = validate_indices(indices or [])
         with self.lock:
             if not self.token or not self.profile or self.error:
                 raise ConnectionError('Connect a valid Dhan account in Settings first.')
@@ -255,20 +256,40 @@ class DhanSession:
                 mapping = INSTRUMENTS.resolve(symbols)
             except Exception:
                 raise ConnectionError('Cannot load the Dhan instrument list. Check internet access and retry.') from None
-            key = tuple(symbols)
+            key = (tuple(symbols), tuple(indices))
             if self.quote_cache is not None and self.quote_key == key and time.monotonic() - self.quote_time < 0.9:
                 return self.quote_cache
             # Dhan market-quote APIs allow one request per second, including other app callers.
             elapsed = time.monotonic() - self.quote_time
-            if mapping and self.quote_time and elapsed < 1.05:
+            if (mapping or indices) and self.quote_time and elapsed < 1.05:
                 time.sleep(1.05 - elapsed)
-            data = dhan_read(self.token, self.profile['dhanClientId'], '/marketfeed/ohlc',
-                             {'NSE_EQ': sorted(set(mapping.values()))}) if mapping else {}
+            try:
+                index_mapping = INSTRUMENTS.resolve_indices(indices) if indices else {}
+            except Exception:
+                index_mapping = {}
+            request_segments = {}
+            if mapping:
+                request_segments['NSE_EQ'] = sorted(set(mapping.values()))
+            if index_mapping:
+                request_segments['IDX_I'] = sorted(set(index_mapping.values()))
+            data = dhan_read(self.token, self.profile['dhanClientId'], '/marketfeed/ohlc', request_segments) if request_segments else {}
             if not isinstance(data, dict) or not isinstance(data.get('data', {}), dict):
                 raise ConnectionError('Dhan returned an invalid market-data response.')
             prices = data.get('data', {}).get('NSE_EQ', {})
             if not isinstance(prices, dict):
                 raise ConnectionError('Dhan returned an invalid equity quote response.')
+            index_quote_data = {}
+            if index_mapping:
+                # Use Dhan's full quote packet for indices: net_change remains the
+                # session change after close, while OHLC close may roll over to LTP.
+                time.sleep(1.05)
+                index_quote_data = dhan_read(self.token, self.profile['dhanClientId'], '/marketfeed/quote',
+                                             {'IDX_I': sorted(set(index_mapping.values()))})
+                if not isinstance(index_quote_data, dict) or not isinstance(index_quote_data.get('data', {}), dict):
+                    raise ConnectionError('Dhan returned an invalid index quote response.')
+            index_prices = index_quote_data.get('data', {}).get('IDX_I', {}) if index_quote_data else {}
+            if not isinstance(index_prices, dict):
+                index_prices = {}
             fetched = datetime.now(timezone.utc).isoformat()
             quotes = {}
             for symbol, security_id in mapping.items():
@@ -281,12 +302,32 @@ class DhanSession:
                                       'previousClose': previous_close if isinstance(previous_close, (int, float)) and math.isfinite(previous_close) and previous_close > 0 else None,
                                       'dayChange': price - previous_close if isinstance(previous_close, (int, float)) and math.isfinite(previous_close) and previous_close > 0 else None,
                                       'source': 'Dhan', 'fetchedAt': fetched}
-            result = {'quotes': quotes, 'unresolved': [s for s in symbols if s not in mapping],
+            index_quotes = {}
+            for symbol, security_id in index_mapping.items():
+                quote = index_prices.get(str(security_id), {})
+                price = quote.get('last_price') if isinstance(quote, dict) else None
+                ohlc = quote.get('ohlc') if isinstance(quote, dict) else None
+                previous_close = ohlc.get('close') if isinstance(ohlc, dict) else None
+                net_change = quote.get('net_change') if isinstance(quote, dict) else None
+                if isinstance(price, (int, float)) and math.isfinite(price) and price > 0:
+                    valid_change = isinstance(net_change, (int, float)) and math.isfinite(net_change)
+                    valid_close = isinstance(previous_close, (int, float)) and math.isfinite(previous_close) and previous_close > 0
+                    day_change = net_change if valid_change else price - previous_close if valid_close else None
+                    base_close = price - day_change if day_change is not None and price - day_change > 0 else previous_close if valid_close else None
+                    index_quotes[symbol] = {'price': price, 'securityId': str(security_id),
+                                            'previousClose': base_close,
+                                            'dayChange': day_change,
+                                            'dayChangePercent': day_change / base_close * 100 if day_change is not None and base_close else None,
+                                            'source': 'Dhan index', 'fetchedAt': fetched}
+            result = {'quotes': quotes, 'indexQuotes': index_quotes, 'indexChangeAvailable': True,
+                      'unresolved': [s for s in symbols if s not in mapping],
                       'missing': [s for s in mapping if s not in quotes],
-                      'quoteDiagnostics': {'apiStatus': str(data.get('status') or 'unknown')[:30],
-                                           'requestedInstrumentCount': len(set(mapping.values())),
-                                           'returnedInstrumentCount': len(prices),
-                                           'returnedSegmentNames': sorted(str(k)[:30] for k in data.get('data', {}))},
+                      'unresolvedIndices': [s for s in indices if s not in index_mapping],
+                      'missingIndices': [s for s in index_mapping if s not in index_quotes],
+                      'quoteDiagnostics': {'apiStatus': str((index_quote_data or data).get('status') or 'unknown')[:30],
+                                           'requestedInstrumentCount': len(set(mapping.values())) + len(set(index_mapping.values())),
+                                           'returnedInstrumentCount': len(prices) + len(index_prices),
+                                           'returnedSegmentNames': sorted(set(str(k)[:30] for k in data.get('data', {})) | set(str(k)[:30] for k in (index_quote_data or {}).get('data', {})))},
                       'fetchedAt': fetched}
             self.quote_cache, self.quote_key, self.quote_time = result, key, time.monotonic()
             return result
@@ -648,7 +689,7 @@ class Handler(SimpleHTTPRequestHandler):
                         LIVE.pause()
                     result = DHAN.disconnect()
                 elif self.path == '/api/dhan/quotes':
-                    result = DHAN.quotes(body.get('symbols'))
+                    result = DHAN.quotes(body.get('symbols', []), body.get('indices', []))
                 elif self.path == '/api/dhan/sale':
                     result = DHAN.sale(body.get('symbol'), body.get('orderId'), body.get('quantity'))
                 elif self.path == '/api/dhan/trade-history':

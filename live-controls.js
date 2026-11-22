@@ -6,6 +6,7 @@
  async function api(path,body){const response=await fetch('/api/live/'+path,{method:body?'POST':'GET',headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined,cache:'no-store',signal:AbortSignal.timeout(60000)});if(!(response.headers.get('Content-Type')||'').includes('application/json'))throw Error('Restart the updated application backend for live trading.');const data=await response.json();if(!response.ok)throw Error(data.error||'Live request failed.');return data;}
  function display(data){
   lastDisplay=data;
+  globalThis.TradeDeskData.setExecutionStatus?.(data);
   const active=data.records.filter(r=>!['DISARMED','CLOSED','CANCELLED','REJECTED','EXPIRED'].includes(r.state));
   $('tradingModeBadge').textContent=data.enabled?'LIVE CNC ENABLED':data.unverifiedActiveCount?'RECONNECT TO CHECK LIVE ORDERS':active.length?'LIVE ENTRIES PAUSED':'PAPER MODE';
   $('tradingModeBadge').className='pill '+(data.enabled||active.length||data.unverifiedActiveCount?'liveBadge':'paper');
@@ -14,7 +15,7 @@
   $('liveRecords').innerHTML=($('liveRecordsFilter').value==='all'?data.records:active).map(r=>`<tr><td>${escape(r.symbol)}</td><td>${r.state==='ARMED'?'Watching entry':escape(r.state)}</td><td>${r.filledQty||0} / ${r.quantity}</td><td>${money(r.entry)}</td><td class="red">${money(r.sl)}</td><td class="green">${money(r.target)}</td><td>${escape(r.orderId||'Not submitted')}</td><td>${escape(r.message)}</td></tr>`).join('')||'<tr><td colspan="8">No ongoing app automation records in this view. Current account holdings appear above.</td></tr>';
   globalThis.TradeDeskData.setPlanFlags?.(data.planEnabled||{});globalThis.TradeDeskData.setLiveRecords(data.records);
  }
- async function refresh(){if(busy||queueing)return;try{const wasEnabled=!!lastDisplay?.enabled,data=await api('status');display(data);if(data.enabled&&(!initialStatusLoaded||!wasEnabled))await activatePlans(globalThis.TradeDeskData.watchingPlans?.()||[]);initialStatusLoaded=true;}catch(error){$('liveState').textContent=error.message;$('tradingModeBadge').textContent='LIVE STATUS UNAVAILABLE';}}
+ async function refresh(){if(busy||queueing)return;try{const wasEnabled=!!lastDisplay?.enabled,data=await api('status');display(data);if(data.enabled&&(!initialStatusLoaded||!wasEnabled))await activatePlans(globalThis.TradeDeskData.watchingPlans?.()||[]);initialStatusLoaded=true;}catch(error){$('liveState').textContent=error.message;$('tradingModeBadge').textContent='LIVE STATUS UNAVAILABLE';globalThis.TradeDeskData.setExecutionStatus?.({error:error.message,records:[]});}}
  async function perform(action,body){if(busy)return false;busy=true;if(action==='enable')pauseRequested=false;$('liveEnable').disabled=true;let success=false;try{await api(action,body);if(action==='enable'&&pauseRequested)await api('pause',{});lastError=null;display(await api('status'));success=true;}catch(error){lastError=error.message;$('liveState').textContent=error.message;}finally{busy=false;}return success;}
  async function pause(){pauseRequested=true;try{await api('pause',{});lastError=null;display(await api('status'));return true;}catch(error){lastError='Live pause could not be confirmed: '+error.message;$('liveState').textContent=lastError;return false;}}
  async function activatePlans(plans){

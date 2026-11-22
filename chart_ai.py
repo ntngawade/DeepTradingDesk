@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parent
 BUSY = threading.Lock()
 STATUS_CACHE = None
 STATUS_TIME = 0
-API_VERSION = 14
+API_VERSION = 17
 RAPID_ENGINE = None
 RAPID_LOCK = threading.Lock()
 SETUPS = {'Y': 'YIT', 'H': 'HYIT', 'HY': 'HYIT', 'Q': 'QIT', 'M': 'MIT', 'W': 'WIT', 'D': 'DIT'}
@@ -52,7 +52,7 @@ def rapid_ocr(image):
     global RAPID_ENGINE
     try:
         import numpy as np
-        from PIL import Image
+        from PIL import Image, ImageEnhance, ImageFilter, ImageOps
         from rapidocr import RapidOCR
         raw = base64.b64decode(image, validate=True)
         with Image.open(__import__('io').BytesIO(raw)) as source:
@@ -89,23 +89,34 @@ def rapid_ocr(image):
             lines = []
             for left, top, right_edge, bottom_edge, scan in regions:
                 crop = source.crop((left, top, right_edge, bottom_edge))
-                scale = min(3.0, 2200/max(crop.size))
+                scale = min(3.5, 2500/max(crop.size))
                 if scale > 1:
-                    crop = crop.resize((int(crop.width*scale), int(crop.height*scale)))
-                frame = np.asarray(crop)
-                output = RAPID_ENGINE(frame)
-                for text, box, score in zip(output.txts if output.txts is not None else (),
-                                           output.boxes if output.boxes is not None else (),
-                                           output.scores if output.scores is not None else ()):
-                    if not text or float(score) < 0.20:
-                        continue
-                    xs = [left+float(point[0])/scale for point in box]
-                    ys = [top+float(point[1])/scale for point in box]
-                    x, y = min(xs)/width, min(ys)/height
-                    right, bottom = max(xs)/width, max(ys)/height
-                    lines.append({'text': str(text), 'x': x, 'y': y, 'right': right,
-                                  'bottom': bottom, 'words': [{'text': str(text), 'x': x, 'y': y,
-                                  'width': max(0.001, right-x), 'height': max(0.001, bottom-y)}], 'scan': scan})
+                    crop = crop.resize((int(crop.width*scale), int(crop.height*scale)), Image.Resampling.LANCZOS)
+                # Preserve the original pixels for OCR and also scan a locally
+                # enhanced version of tiny title/price-label crops. Contrast and
+                # a restrained unsharp mask can help mild blur; no pixels are
+                # uploaded or written to disk. Full overview remains a single pass.
+                variants = [crop]
+                if scan != 'full':
+                    gray = ImageOps.grayscale(crop)
+                    enhanced = ImageOps.autocontrast(gray, cutoff=0.5)
+                    enhanced = ImageEnhance.Contrast(enhanced).enhance(1.45)
+                    enhanced = enhanced.filter(ImageFilter.UnsharpMask(radius=1.2, percent=150, threshold=3))
+                    variants.append(enhanced.convert('RGB'))
+                for variant in variants:
+                    output = RAPID_ENGINE(np.asarray(variant))
+                    for text, box, score in zip(output.txts if output.txts is not None else (),
+                                               output.boxes if output.boxes is not None else (),
+                                               output.scores if output.scores is not None else ()):
+                        if not text or float(score) < 0.20:
+                            continue
+                        xs = [left+float(point[0])/scale for point in box]
+                        ys = [top+float(point[1])/scale for point in box]
+                        x, y = min(xs)/width, min(ys)/height
+                        right, bottom = max(xs)/width, max(ys)/height
+                        lines.append({'text': str(text), 'x': x, 'y': y, 'right': right,
+                                      'bottom': bottom, 'words': [{'text': str(text), 'x': x, 'y': y,
+                                      'width': max(0.001, right-x), 'height': max(0.001, bottom-y)}], 'scan': scan})
         if not lines:
             raise LocalAIError('RapidOCR found no readable chart text. Try a closer, clearer chart screenshot.')
         return {'lines': lines, 'width': width, 'height': height, 'engine': 'RapidOCR / ONNX Runtime (local)'}
@@ -123,7 +134,7 @@ def status():
             native_ocr()
         import rapidocr, onnxruntime
         result = {'connected': True, 'engine': 'RapidOCR '+onnxruntime.__version__+' / ONNX Runtime (local) + chart parser', 'independent': True, 'apiVersion': API_VERSION,
-                  'message': 'RapidOCR is ready and runs chart OCR locally. Images are not sent to a cloud service.'}
+                  'message': 'RapidOCR is ready with enlarged, contrast-enhanced local passes for chart titles and price labels. Images are not sent to a cloud service.'}
     except LocalAIError as error:
         result = {'connected': False, 'engine': 'Built-in Windows OCR', 'independent': True, 'apiVersion': API_VERSION, 'message': str(error)}
     STATUS_CACHE, STATUS_TIME = result, time.monotonic()
@@ -221,44 +232,39 @@ def parse_chart(document):
     # or the trailing time can prevent an end-anchored match. Clean those known
     # title fields first, then accept only NSE chart intervals we support.
     if not result['timeframe'] and header_lines:
-        for tier in header_tiers:
-            intervals = []
-            for line in tier:
-                text = line['text'].strip().upper()
-                clean = re.sub(r'\b\d{1,2}:\d{2}(?::\d{2})?\b', ' ', text)
-                clean = re.sub(r'@\s*[\d,]+(?:\.\d+)?', ' ', clean)
-                clean = re.sub(r'\b(?:NSE|BSE)\s*[- ]?\s*\d+\b', ' ', clean)
-                named = re.search(r'(?:^|[\s\])])([DWMQYH])(?:\s|$)', clean)
-                if named:
-                    intervals.append((named.group(1), line))
-                numeric_periods = re.finditer(r'(?<![A-Z0-9])([1-9]\d{0,3})(?:\.0+)?\s*(MIN(?:UTES?)?|M)?(?![A-Z0-9])', clean)
-                for numeric in numeric_periods:
-                    minutes = int(numeric.group(1))
-                    explicit_minutes = bool(numeric.group(2))
-                    if explicit_minutes or minutes in NUMERIC_TIMEFRAMES:
-                        intervals.append((str(minutes)+' min', line))
-            distinct = {value for value, _ in intervals}
-            if len(distinct) == 1:
-                value, line = intervals[0]
+        # Analyze all header crops together. A left header crop may contain a
+        # lot number such as 20 while a later crop contains the actual interval
+        # at the far right (240); deciding per crop would select the wrong one.
+        intervals = []
+        for line in header_lines:
+            text = line['text'].strip().upper()
+            clean = re.sub(r'\b\d{1,2}:\d{2}(?::\d{2})?\b', ' ', text)
+            clean = re.sub(r'\b\d{1,4}\s*@\s*[\d,]+(?:\.\d+)?', ' ', clean)
+            clean = re.sub(r'@\s*[\d,]+(?:\.\d+)?', ' ', clean)
+            clean = re.sub(r'\b(?:NSE|BSE)\s*[- ]?\s*\d+\b', ' ', clean)
+            spans = []
+            named = re.search(r'(?:^|[\s\])])([DWMQYH])(?:\s|$)', clean)
+            if named:
+                spans.append((named.start(1), named.end(1), named.group(1)))
+            for numeric in re.finditer(r'(?<![A-Z0-9])([1-9]\d{0,3})(?:\.0+)?\s*(MIN(?:UTES?)?|M)?(?![A-Z0-9])', clean):
+                minutes = int(numeric.group(1))
+                if numeric.group(2) or minutes in NUMERIC_TIMEFRAMES:
+                    spans.append((numeric.start(1), numeric.end(1), str(minutes)+' min'))
+            for start, end, value in spans:
+                center = ((start+end)/2)/max(1, len(clean))
+                header_x = line['x']+(line['right']-line['x'])*center
+                intervals.append((header_x, value, line))
+        if intervals:
+            rightmost_x = max(x for x, _, _ in intervals)
+            rightmost = [item for item in intervals if abs(item[0]-rightmost_x) < 0.005]
+            rightmost_values = {value for _, value, _ in rightmost}
+            if len(rightmost_values) == 1:
+                value = rightmost[0][1]
                 result['timeframe'] = value
                 result['timeframeLabel'] = TIMEFRAMES.get(value, value)
-                evidence['timeframe'] = line['text']
-                break
-            if len(distinct) > 1:
-                # A split OCR title can repeat the same period in overlapping
-                # crops. Prefer the right-most supported period in the title.
-                ordered = []
-                for value, line in intervals:
-                    position = max((m.start() for m in re.finditer(r'(?<![A-Z0-9])'+re.escape(value.split()[0])+r'(?![A-Z0-9])', line['text'].upper())), default=-1)
-                    ordered.append((position, value, line))
-                rightmost = max(ordered, key=lambda candidate: candidate[0])
-                if rightmost[0] >= 0 and sum(1 for position, value, _ in ordered if position == rightmost[0] and value == rightmost[1]) == 1:
-                    result['timeframe'] = rightmost[1]
-                    result['timeframeLabel'] = TIMEFRAMES.get(rightmost[1], rightmost[1])
-                    evidence['timeframe'] = rightmost[2]['text']
-                    break
-                warnings.append('Several possible execution intervals appear in the chart header; review the timeframe before adding.')
-                break
+                evidence['timeframe'] = rightmost[0][2]['text']
+            else:
+                warnings.append('Several possible execution intervals appear at the right side of the chart header; review the timeframe before adding.')
     for field, label in LABELS.items():
         found = []
         candidates = [(line, line['text']) for line in lines]

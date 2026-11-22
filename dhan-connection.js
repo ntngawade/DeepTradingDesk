@@ -4,6 +4,7 @@
  let hasSession=false, remembered=false, needsToken=false, busy=false, backendReady=false;
  try{$('dhanClientId').value=localStorage.getItem('deepDesk.dhanClientId')||'';}catch{}
  function show(status){
+  globalThis.TradeDeskData.setDhanStatus?.(status);
   globalThis.TradeDeskMarket?.setConnection(!!status.connected);
   globalThis.TradeDeskPortfolio?.setConnection(!!status.connected);
   hasSession=!!status.hasSession;remembered=!!status.remembered;needsToken=!!status.needsToken;
@@ -27,7 +28,7 @@
   if(!json||[404,405,501].includes(response.status)){backendReady=false;$('dhanBackendHelp').classList.remove('hidden');throw Error('This server does not provide the Dhan connection API. Run python NitinTradeDesk/server.py --port 8081, then open http://127.0.0.1:8081. Do not use Live Server or python -m http.server.');}
   const data=await response.json();if(!response.ok)throw Error(data.error||'Dhan connection request failed.');backendReady=true;$('dhanBackendHelp').classList.add('hidden');return data;
  }
- async function run(path,body){if(busy)return;busy=true;$('dhanConnect').disabled=true;$('dhanRefresh').disabled=true;$('dhanDisconnect').disabled=true;try{const result=await request(path,body);show(result);return result;}catch(error){$('dhanStatus').textContent=error.message;$('dhanStatus').className='hint red';$('dhanBadge').textContent='Dhan / Check connection';$('dhanBadge').className='pill paper';}finally{busy=false;$('dhanConnect').disabled=false;$('dhanRefresh').disabled=!hasSession;$('dhanDisconnect').disabled=!(hasSession||remembered);}}
+ async function run(path,body){if(busy)return;busy=true;$('dhanConnect').disabled=true;$('dhanRefresh').disabled=true;$('dhanDisconnect').disabled=true;try{const result=await request(path,body);show(result);return result;}catch(error){$('dhanStatus').textContent=error.message;$('dhanStatus').className='hint red';$('dhanBadge').textContent='Dhan / Check connection';$('dhanBadge').className='pill paper';globalThis.TradeDeskData.setDhanStatus?.({error:error.message,connected:false,hasSession});}finally{busy=false;$('dhanConnect').disabled=false;$('dhanRefresh').disabled=!hasSession;$('dhanDisconnect').disabled=!(hasSession||remembered);}}
  $('dhanForm').onsubmit=async event=>{event.preventDefault();if(busy)return;if(!backendReady){const status=await run('status');if(!status)return;}const accessToken=$('dhanToken').value.trim(),clientId=$('dhanClientId').value.trim();try{localStorage.setItem('deepDesk.dhanClientId',clientId);}catch{}$('dhanStatus').textContent='Verifying account with Dhan...';const result=await run('connect',{clientId,accessToken,remember:!!$('dhanRemember').checked});if(result?.connected)$('dhanToken').value='';};
  $('dhanRefresh').onclick=()=>run('refresh',{});
  $('dhanDisconnect').onclick=()=>run('disconnect',{});
