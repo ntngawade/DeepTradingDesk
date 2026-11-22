@@ -1,9 +1,9 @@
 'use strict';
 const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
 const elements=new Map();
-function element(id){if(!elements.has(id))elements.set(id,{value:'',innerHTML:'',classList:{toggle(){},add(){},remove(){}},addEventListener(){},reset(){}});return elements.get(id);}
+function element(id){if(!elements.has(id))elements.set(id,{value:'',innerHTML:'',options:[],dataset:{},disabled:false,classList:{toggle(){},add(){},remove(){}},addEventListener(){},reset(){}});return elements.get(id);}
 const context={Intl,Date,Number,String,Math,Array,Object,Set,JSON,crypto:require('node:crypto').webcrypto,
- localStorage:{getItem(){return null;},setItem(){}},document:{getElementById:element,querySelectorAll(){return [];},querySelector:element,body:{addEventListener(){}}},
+ window:{DEEP_TRADE_SECTOR_MAP:{sectors:[],symbols:{}}},localStorage:{getItem(){return null;},setItem(){}},document:{getElementById:element,querySelectorAll(){return [];},querySelector:element,body:{addEventListener(){}}},
  setTimeout(){},clearTimeout(){},fetch:async()=>({ok:false})};
 vm.createContext(context);
 for(const name of ['trade-math.js','import-core.js','app.js'])vm.runInContext(fs.readFileSync(__dirname+'/'+name,'utf8'),context);
@@ -25,8 +25,8 @@ assert.equal(run("performanceSummary([{status:'Holding',fill:100,exit:200,qty:10
 assert.equal(run("performanceSummary([{status:'Closed',fill:100,exit:101,qty:10,brokerage:20}]).losses"),1);
 assert.equal(run("performanceSummary([{status:'Closed',fill:0.1,exit:0.3,qty:10,brokerage:2,actualTotalCharges:2}]).breakeven"),1);
 assert.equal(run('allPlansExportRows().length'),22);
-assert.equal(run('allPlansExportRows()[0][18]'), 'Status');
-assert.equal(run('allPlansExportRows()[1][9]'),run('state.plans[0].qty'));
+assert.equal(run('allPlansExportRows()[0][18]'), 'Trade ID');
+assert.equal(run('allPlansExportRows()[1][10]'),run('state.plans[0].qty'));
 assert.equal(run('allPlansExportRows()[1].length'),run('allPlansExportRows()[0].length'));
 context.planUpdates=workbook.planUpdates;
 run("var correctedCummins=state.plans.find(p=>p.symbol==='CUMMINSIND');correctedCummins.target=4279.82;");

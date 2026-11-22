@@ -73,7 +73,7 @@ class BrokerTests(unittest.TestCase):
         self.assertEqual(self.broker.exit_fills(record), {'quantity': 5, 'price': 105,'entryTradeAt':'2026-11-16 09:20:00','exitTradeAt':'2026-11-16 10:05:00'})
         self.opener.open.return_value = Response([{**trade, 'tradedQuantity': 2}])
         self.assertIsNone(self.broker.exit_fills(record))
-        self.opener.open.return_value = Response([trade, trade])
+        self.opener.open.return_value = Response([entry, trade, trade])
         with self.assertRaises(ValueError):
             self.broker.exit_fills(record)
 

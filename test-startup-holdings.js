@@ -2,7 +2,7 @@
 const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
 async function test(){
  const html=fs.readFileSync(__dirname+'/index.html','utf8'),ids=new Set([...html.matchAll(/\bid="([^"]+)"/g)].map(m=>m[1])),elements=new Map(),calls=[];
- function element(){return {value:'',textContent:'',innerHTML:'',disabled:false,setAttribute(){},addEventListener(){},classList:{hidden:false,toggle(name,value){if(name==='hidden')this.hidden=value;},contains(name){return name==='hidden'&&this.hidden;},add(){},remove(){}}};}
+ function element(){return {value:'',textContent:'',innerHTML:'',options:[],dataset:{},disabled:false,setAttribute(){},addEventListener(){},classList:{hidden:false,toggle(name,value){if(name==='hidden')this.hidden=value;},contains(name){return name==='hidden'&&this.hidden;},add(){},remove(){}}};}
  const el=id=>{assert(ids.has(id),'Missing HTML control: '+id);if(!elements.has(id))elements.set(id,element());return elements.get(id);};
  const workbook=JSON.parse(fs.readFileSync(__dirname+'/tracker-data.json','utf8'));
  const plan=(symbol,entry,sl,target,qty,extra={})=>({id:symbol,symbol,entry,sl,target,qty,qtyMode:'manual',targetMode:'manual',status:'Watching',setup:'QIT',timeframe:'Weekly',sourceQty:0,...extra});
@@ -10,7 +10,7 @@ async function test(){
  const stored=new Map([['tradeDesk.v1',JSON.stringify(saved)]]),nav=element();
  class SkewedClock extends Date{static now(){return Date.now()+3600000;}}
  const context={Intl,Date:SkewedClock,Number,String,Math,Array,Object,Set,Map,JSON,AbortSignal,crypto:require('node:crypto').webcrypto,setTimeout(){},clearTimeout(){},setInterval(){},
-  localStorage:{getItem:key=>stored.get(key)||null,setItem:(key,value)=>stored.set(key,value)},location:{hash:'#live'},history:{replaceState(){}},
+  window:{DEEP_TRADE_SECTOR_MAP:{sectors:[],symbols:{}}},localStorage:{getItem:key=>stored.get(key)||null,setItem:(key,value)=>stored.set(key,value)},location:{hash:'#live'},history:{replaceState(){}},
   document:{hidden:false,getElementById:el,querySelector:selector=>selector==='nav'?nav:element(),querySelectorAll:()=>[],documentElement:{setAttribute(){}},body:{addEventListener(type,fn){if(type==='click')(context.clickHandlers||(context.clickHandlers=[])).push(fn);}},addEventListener(){}},
   fetch:async(path,options={})=>{
    calls.push({path,method:options.method||'GET'});let data,ok=true;

@@ -609,7 +609,7 @@ class Handler(SimpleHTTPRequestHandler):
                         raise ValueError('Explicit live-order acknowledgement is required.')
                     result = engine.enable()
                 elif self.path == '/api/live/pause':
-                    engine.pause()
+                    engine.pause(manual=True)
                     result = engine.status()
                 elif self.path == '/api/live/preview':
                     result = engine.preview(body.get('plan'), body.get('settings'), body.get('triggerPercent', 1))

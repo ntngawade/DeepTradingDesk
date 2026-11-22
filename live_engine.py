@@ -84,13 +84,16 @@ class LiveEngine:
         self.db = sqlite3.connect(str(self.path), check_same_thread=False)
         self.db.execute('CREATE TABLE IF NOT EXISTS plans (account TEXT, trade_id TEXT, data TEXT, PRIMARY KEY(account,trade_id))')
         self.db.execute('CREATE TABLE IF NOT EXISTS plan_flags (trade_id TEXT PRIMARY KEY, enabled INTEGER NOT NULL)')
+        self.db.execute('CREATE TABLE IF NOT EXISTS engine_control (account TEXT PRIMARY KEY, manual_pause INTEGER NOT NULL DEFAULT 0)')
         self.db.commit()
         self.lock = threading.RLock()
         self.cycle_lock = threading.Lock()
         self.broker = broker
         self.is_open = is_open
-        self.enabled = False  # Never resumes new submissions automatically after restart.
+        self.enabled = False  # Startup resumes only after broker reconciliation and valid prerequisites.
         self.enabled_account = None
+        self.auto_pause_reason = None
+        self.startup_reconciliation_pending = True
         self.control_generation = 0
         self.previews = {}
         self.error = None
@@ -120,6 +123,14 @@ class LiveEngine:
         row = self.db.execute('SELECT enabled FROM plan_flags WHERE trade_id=?', (trade_id,)).fetchone()
         return row is None or bool(row[0])
 
+    def _manual_pause(self, account):
+        if not account:
+            return False
+        row = self.db.execute('SELECT manual_pause FROM engine_control WHERE account=?', (account,)).fetchone()
+        if row is None:
+            row = self.db.execute("SELECT manual_pause FROM engine_control WHERE account='*'").fetchone()
+        return bool(row[0]) if row else False
+
     def set_plan_enabled(self, trade_id, enabled):
         if not isinstance(trade_id, str) or not 1 <= len(trade_id) <= 400 or not isinstance(enabled, bool):
             raise ValueError('Valid trade ID and enabled flag required.')
@@ -143,10 +154,16 @@ class LiveEngine:
                 raise
         return self.status()
 
-    def pause(self):
+    def pause(self, manual=False, automatic=False):
         with self.lock:
             self.control_generation += 1
             self.enabled = False
+            if not automatic:
+                self.auto_pause_reason = None
+            if manual:
+                account = self.broker.account() or '*'
+                self.db.execute('INSERT OR REPLACE INTO engine_control VALUES (?,1)', (account,))
+                self.db.commit()
 
     def enable(self):
         with self.lock:
@@ -157,6 +174,10 @@ class LiveEngine:
             if generation != self.control_generation:
                 raise ValueError('Live enable was cancelled by a newer Pause request.')
             self.enabled, self.enabled_account = True, account
+            self.auto_pause_reason = None
+            self.startup_reconciliation_pending = False
+            self.db.execute('INSERT OR REPLACE INTO engine_control VALUES (?,0)', (account,))
+            self.db.commit()
             self.error = None
         return self.status()
 
@@ -164,10 +185,12 @@ class LiveEngine:
         account = self.broker.account()
         with self.lock:
             unverified = sum(json.loads(raw)['state'] in ACTIVE for (raw,) in self.db.execute('SELECT data FROM plans')) if not account else 0
+            manual_pause = self._manual_pause(account)
             return {'enabled': bool(self.enabled and account == self.enabled_account),
                     'planEnabled': {trade_id: bool(enabled) for trade_id, enabled in self.db.execute('SELECT trade_id,enabled FROM plan_flags')},
                     'account': account, 'records': self.records(account) if account else [],
                     'error': self.error, 'marketSession': self.is_open(), 'triggerPercent': 1,
+                    'manualPaused': manual_pause,
                     'unverifiedActiveCount': unverified,
                     'engine': 'CNC_SUPER_ORDER', 'entryRule': 'WITHIN_TRIGGER_BAND_TOUCH_ENTRY_MARKET', 'entryOrderType': 'MARKET', 'serverRequiredForNewEntries': True}
 
@@ -294,12 +317,28 @@ class LiveEngine:
                                           closedAt=sale.get('exitTradeAt') or now(), entryTradeAt=sale.get('entryTradeAt') or record.get('entryTradeAt'),
                                           exitTradeAt=sale.get('exitTradeAt'), message='Full linked BUY and SELL executions verified in Dhan trade history.')
                         else:
-                            record.update(state='ACTION_REQUIRED', message='Order is no longer in Dhan’s current Super Order list. Historical trade history does not yet confirm a full linked sale; check Dhan before enabling new entries.')
+                            held_quantity = getattr(self.broker, 'holding_quantity', lambda _record: None)(record)
+                            if held_quantity == record.get('filledQty') and held_quantity:
+                                record.update(state='EXIT_TRIGGERED', message=f'Dhan confirms {held_quantity} shares remain held and trade history has no SELL fill. Do not resubmit this plan; manage or restore its exit protection in Dhan. Other enabled plans may continue.')
+                            else:
+                                record.update(state='ACTION_REQUIRED', message=f'Order is no longer in Dhan’s current Super Order list and no full linked sale is verified (Dhan holding: {held_quantity if held_quantity is not None else "unavailable"} / {record.get("filledQty", 0)} shares). Check Dhan before enabling new entries.')
                     except Exception as error:
                         record['historicalCheckAt'] = now()
                         record.update(state='ACTION_REQUIRED', message='Could not verify the old Super Order in Dhan historical trade history: '+str(error)[:220])
                 else:
-                    record.update(state='ACTION_REQUIRED', message='Order is outside Dhan’s current Super Order list; waiting for the next historical trade verification. No resubmission will occur.')
+                    if record.get('state') == 'EXIT_TRIGGERED':
+                        # Keep a verified open holding out of the global pause while
+                        # historical trade checks are rate-limited between cycles.
+                        continue
+                    try:
+                        held_quantity = getattr(self.broker, 'holding_quantity', lambda _record: None)(record)
+                    except Exception:
+                        held_quantity = None
+                    if held_quantity == record.get('filledQty') and held_quantity:
+                        record.update(state='EXIT_TRIGGERED', holdingVerifiedAt=now(),
+                                      message=f'Dhan confirms {held_quantity} shares remain held and trade history has no SELL fill. Do not resubmit this plan; manage or restore its exit protection in Dhan. Other enabled plans may continue.')
+                    else:
+                        record.update(state='ACTION_REQUIRED', message='Order is outside Dhan’s current Super Order list; waiting for the next historical trade verification. No resubmission will occur.')
             else:
                 order = matches[0]
                 if (str(order.get('securityId')) != record['securityId'] or order.get('transactionType') != 'BUY'
@@ -377,10 +416,23 @@ class LiveEngine:
             records = self.records(account)
             self.reconcile(account, records)
             records = self.records(account)
-            if any(r['state'] in ('UNKNOWN', 'ACTION_REQUIRED') for r in records):
-                self.error = 'Review unresolved broker orders in Dhan before enabling new entries.'
-                self.pause()
+            blockers = [r for r in records if r['state'] in ('UNKNOWN', 'ACTION_REQUIRED')]
+            if blockers:
+                details = ' / '.join(f"{r['symbol']}: {r.get('message') or r['state']}" for r in blockers)
+                self.error = 'Live entries paused for broker review. ' + details
+                self.auto_pause_reason = 'broker review'
+                self.enabled_account = account
+                self.startup_reconciliation_pending = False
+                self.pause(automatic=True)
                 return
+            if self.auto_pause_reason == 'broker review' and self.enabled_account == account and not self._manual_pause(account):
+                self.enabled, self.error, self.auto_pause_reason = True, None, None
+            if self.startup_reconciliation_pending:
+                enabled_flags = self.db.execute('SELECT 1 FROM plan_flags WHERE enabled=1 LIMIT 1').fetchone()
+                if enabled_flags and not self._manual_pause(account):
+                    self.broker.prerequisites()
+                    self.enabled, self.enabled_account, self.error = True, account, None
+                self.startup_reconciliation_pending = False
             if not self.enabled or account != self.enabled_account or not self.is_open():
                 return
             armed_symbols = sorted({r['symbol'] for r in records if r['state'] == 'ARMED'})

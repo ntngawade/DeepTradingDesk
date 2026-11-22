@@ -22,6 +22,7 @@ class FakeBroker:
         self.exit = None
         self.uncertain = False
         self.exposure = False
+        self.held_quantity = None
 
     def account(self):
         return self.client_id
@@ -53,6 +54,9 @@ class FakeBroker:
     def exit_fills(self, record):
         return self.exit
 
+    def holding_quantity(self, record):
+        return self.held_quantity
+
     def submit(self, record):
         self.sent.append(copy.deepcopy(record))
         self.book.append({'dhanClientId': self.client_id, 'orderId': 'ORDER1', 'correlationId': record['correlationId'],
@@ -67,6 +71,37 @@ class FakeBroker:
 
 
 class LiveEngineTests(unittest.TestCase):
+    def test_triggered_exit_with_shares_still_held_does_not_pause_other_enabled_plans(self):
+        record = {'tradeId': 'OLD-BSOFT', 'symbol': 'BSOFT', 'securityId': '6994', 'quantity': 5,
+                  'filledQty': 5, 'entry': 100, 'sl': 95, 'target': 110, 'cash': 500, 'risk': 25,
+                  'capital': 500000, 'riskLimit': 5000, 'triggerPercent': 1, 'externalCash': 0,
+                  'expiry': '', 'tickSize': 0.05, 'account': '123', 'orderId': 'OLD-ORDER',
+                  'correlationId': 'OLD-CORRELATION', 'reviewedAt': '2026-11-16T04:00:00+00:00',
+                  'submittedAt': '2026-11-16T04:00:00+00:00', 'state': 'ACTION_REQUIRED',
+                  'historicalCheckAt': datetime.now(timezone.utc).isoformat(),
+                  'brokerLegs': [{'orderId': 'OLD-ORDER'}]}
+        self.engine._write('123', record)
+        self.engine.db.execute('INSERT OR REPLACE INTO plan_flags VALUES (?,1)', (PLAN['id'],))
+        self.engine.db.commit()
+        self.broker.held_quantity = 5
+        self.engine.cycle()
+        self.assertEqual(self.record('OLD-BSOFT')['state'], 'EXIT_TRIGGERED')
+        self.assertTrue(self.engine.enabled)
+        self.assertIsNone(self.engine.status()['error'])
+        self.engine.cycle()
+        self.assertEqual(self.record('OLD-BSOFT')['state'], 'EXIT_TRIGGERED')
+        self.assertTrue(self.engine.enabled)
+        self.assertFalse(self.broker.sent)
+
+    def test_manual_pause_survives_restart_even_with_enabled_plans(self):
+        self.engine.set_plan_enabled(PLAN['id'], True)
+        self.engine.pause(manual=True)
+        self.engine.db.close()
+        self.engine = LiveEngine(self.path, self.broker, is_open=lambda: True)
+        self.engine.cycle()
+        self.assertFalse(self.engine.enabled)
+        self.assertTrue(self.engine.status()['manualPaused'])
+
     def test_disabled_plan_blocks_preview_and_default_is_enabled(self):
         self.assertTrue(self.engine.plan_enabled(PLAN['id']))
         self.engine.set_plan_enabled(PLAN['id'], False)
@@ -129,8 +164,8 @@ class LiveEngineTests(unittest.TestCase):
         self.engine.arm(review['previewId'])
         return review
 
-    def record(self):
-        return self.engine.records('123')[0]
+    def record(self, trade_id=PLAN['id']):
+        return next(r for r in self.engine.records('123') if r['tradeId'] == trade_id)
 
     def test_one_percent_entry_touch_market_order_partial_fills_protection_and_actual_exit(self):
         review = self.arm()

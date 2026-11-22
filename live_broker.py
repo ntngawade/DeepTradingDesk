@@ -107,6 +107,25 @@ class DhanLiveBroker:
     def orders(self):
         return self.call('/super/orders')
 
+    def holding_quantity(self, record):
+        """Return the current Dhan CNC holding quantity for this NSE instrument."""
+        rows = self.call('/holdings')
+        if not isinstance(rows, list):
+            raise ValueError('Unable to verify the current Dhan holding for this live trade.')
+        quantity = 0
+        for row in rows:
+            if (not isinstance(row, dict) or str(row.get('securityId')) != str(record.get('securityId'))
+                    or row.get('exchangeSegment', 'NSE_EQ') != 'NSE_EQ'):
+                continue
+            try:
+                value = float(row.get('totalQty') or 0)
+            except (TypeError, ValueError, OverflowError):
+                raise ValueError('Dhan returned an invalid holding quantity for this live trade.') from None
+            if not math.isfinite(value) or value < 0 or value != int(value):
+                raise ValueError('Dhan returned an invalid holding quantity for this live trade.')
+            quantity += int(value)
+        return quantity
+
     def entry_fills(self, record):
         """Return a verified weighted BUY fill from Dhan's trade book for one order."""
         rows = self.call('/trades')

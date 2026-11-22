@@ -1,7 +1,7 @@
 ﻿'use strict';
 const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
 const elements=new Map();
-function element(id){if(!elements.has(id))elements.set(id,{value:'',innerHTML:'',textContent:'',classList:{hidden:false,toggle(name,value){if(name==='hidden')this.hidden=value;},add(){},remove(){}},addEventListener(type,fn){this[type]=fn;},reset(){}});return elements.get(id);}
+function element(id){if(!elements.has(id))elements.set(id,{value:'',innerHTML:'',textContent:'',options:[],dataset:{},disabled:false,classList:{hidden:false,toggle(name,value){if(name==='hidden')this.hidden=value;},add(){},remove(){}},addEventListener(type,fn){this[type]=fn;},reset(){}});return elements.get(id);}
 const buttons=['dashboard','planner','completed','importer','live','settings'].map(page=>({dataset:{page},classList:{toggle(){}},setAttribute(){}}));
 const context={Intl,Date,Number,String,Math,Array,Object,Set,Map,JSON,AbortSignal,crypto:require('node:crypto').webcrypto,
  window:{scrollTo(){},confirm(){return true;}},localStorage:{getItem(){return null;},setItem(){}},document:{getElementById:element,querySelectorAll:selector=>selector==='nav button'?buttons:[],querySelector:element,body:{addEventListener(type,fn){if(type==='click')context.clickHandler=fn;}}},setTimeout(){},clearTimeout(){},fetch:async()=>({ok:false})};
@@ -20,12 +20,12 @@ assert(!element('cards').innerHTML.includes('PAGEIND'),'Near includes waiting pl
 element('filter').value='all';run('render();');
 assert(element('cards').innerHTML.includes('radar-tile'),'All setups displays waiting plans');
 assert(!element('cards').innerHTML.includes('PAGEIND'),'Holdings do not appear in All setups');
-assert.equal(run('deskTheme'),'light');
+assert.equal(run('deskTheme'),'dark');
 assert.equal(run('radarMode'),'tiles');
 assert(element('cards').innerHTML.includes('radar-tile'));
 assert(element('cards').innerHTML.includes('Chart & details'));
-element('themeToggle').onclick();assert.equal(run('deskTheme'),'dark');
 element('themeToggle').onclick();assert.equal(run('deskTheme'),'light');
+element('themeToggle').onclick();assert.equal(run('deskTheme'),'dark');
 element('radarView').value='watchlist';element('radarView').onchange();
 assert.equal(run('openPlans().length'),17);
 assert.equal(run('closed().length'),3);
@@ -50,7 +50,7 @@ assert.equal(run('completedTradesView().length'),0);assert(!element('journal').i
 element('plansSearch').value='JIOFIN';run('render();');assert.equal(run('activePlansView().length'),1);
 element('plansSearch').value='';element('plansStatus').value='holding';run('render();');assert.equal(run('activePlansView().length'),0);assert.equal(run('ongoingTradesView().length'),2);
 run("page('completed');");assert.equal(element('completed').classList.hidden,false);assert.equal(element('planner').classList.hidden,true);
-assert(element('pageLabel').textContent.includes('PERFORMANCE ANALYSIS'));
+assert(element('pageLabel').textContent.includes('MY PORTFOLIO'));
 assert(element('cards').innerHTML.includes('class="watchlist"'));
 assert(element('terminalDetail').innerHTML.includes('Planned levels only'));
 run("selectedTradeId=state.plans.find(p=>p.symbol==='JIOFIN').id;TradeDeskData.applyQuotes({quotes:{JIOFIN:{price:210,fetchedAt:'2026-11-14T05:00:00Z'}},unresolved:[]});");
@@ -133,9 +133,12 @@ console.log('Passed: waiting / ongoing / completed separation, tab counts, navig
  for(const [id,value] of Object.entries({symbol:'PAGEIND',setup:'QIT',entry:33000,sl:30000,target:39000,timeframe:'Weekly',targetMode:'manual',qtyMode:'manual',planQty:4,brokerageMode:'auto',planBrokerage:0,expiry:'',notes:'Existing holding'}))element(id).value=value;
  element('planform').onsubmit({preventDefault(){}});
  assert.equal(run("state.plans.find(p=>p.symbol==='PAGEIND').qty"),4,'Future plans may exceed per-trade risk sizing');
+ run("var pagePlanWithCachedQuote=state.plans.find(p=>p.symbol==='PAGEIND');pagePlanWithCachedQuote.cmp=33010;pagePlanWithCachedQuote.cmpSource='Dhan';pagePlanWithCachedQuote.cmpFetchedAt='2026-11-14T05:00:00Z';");
  context.accountSnapshot={clientId:'123',checkedAt:new Date().toISOString(),holdings:[{symbol:'PAGEIND',securityId:'14413',quantity:4,averagePrice:32125}],positions:[]};
  run("TradeDeskData.applyPortfolioSnapshot(accountSnapshot);var pageHolding=state.plans.find(p=>p.symbol==='PAGEIND');");
  assert.equal(run('pageHolding.qty'),4);assert.equal(run('pageHolding.fill'),32125);assert.equal(run('pageHolding.entry'),33000);assert.equal(run('pageHolding.status'),'Imported holding');assert.equal(run('pageHolding.holdingVerified'),true);assert.equal(run('pageHolding.holdingBroker'),'Dhan');
+ assert.equal(run("ongoingTrades().find(p=>p.symbol==='PAGEIND').pnl"),3540,'Open holding P/L uses the saved Dhan CMP after a page reload clears the temporary quote cache');
+ assert(element('unsettledPortfolioRows').innerHTML.includes('PAGEIND'),'Open Dhan holdings appear in the unsettled portfolio section');assert(element('sectorHoldingsRows').innerHTML.includes('NIFTY500'),'Open holdings are included in the sector report');
  assert(element('ongoingRows').innerHTML.includes('Dhan account quantity'));
  element('filter').value='Holding';run('render();');
  assert(element('cards').innerHTML.includes('PAGEIND'),'PAGEIND renders in Radar Holding after a Dhan refresh');
@@ -152,6 +155,9 @@ console.log('Passed: waiting / ongoing / completed separation, tab counts, navig
  context.ambiguousSnapshot={clientId:'123',checkedAt:new Date().toISOString(),holdings:[{symbol:'AMBIG',securityId:'555',quantity:10,averagePrice:101}],positions:[]};
  run('TradeDeskData.applyPortfolioSnapshot(ambiguousSnapshot);');assert.equal(run("state.plans.find(p=>p.id==='AMB1').qty"),2);assert.equal(run("state.plans.find(p=>p.id==='AMB2').qty"),3);
  run("TradeDeskData.linkPortfolioHolding('AMB1');");assert.equal(run("state.plans.find(p=>p.id==='AMB1').qty"),10);assert.equal(run("state.plans.find(p=>p.id==='AMB2').qty"),3);
+ run("state.plans.push({id:'CASEMATCH',symbol:' nse: casematch-eq ',setup:'WIT',timeframe:'Daily',entry:100,sl:90,target:120,qty:1,qtyMode:'manual',status:'Watching'});");
+ context.caseMatchSnapshot={clientId:'123',checkedAt:new Date().toISOString(),holdings:[{symbol:'CASEMATCH',securityId:'556',quantity:7,averagePrice:101}],positions:[]};
+ run('TradeDeskData.applyPortfolioSnapshot(caseMatchSnapshot);');assert.equal(run("state.plans.find(p=>p.id==='CASEMATCH').symbol"),'CASEMATCH','Broker symbol normalization auto-links case, prefix and suffix variations');assert.equal(run("state.plans.find(p=>p.id==='CASEMATCH').qty"),7);assert.equal(run("state.plans.find(p=>p.id==='CASEMATCH').holdingSource"),'Dhan portfolio');
  assert.equal(run('pageHolding.holdingVerified'),false,'A missing holding must be flagged without inventing a sale');assert.equal(run('pageHolding.status'),'Imported holding');
  element('completedSearch').value='';element('completedOutcome').value='all';element('completedSource').value='all';element('completedTimeframe').value='all';
  run("state.plans.push({id:'STATE-TEST',symbol:'STATETEST',entry:100,sl:90,target:120,qty:10,status:'Watching',setup:'MIT',timeframe:'Daily'});render();");
@@ -166,9 +172,17 @@ console.log('Passed: waiting / ongoing / completed separation, tab counts, navig
  element('saleQty').value=200;element('saleBuy').value=264.2;element('salePrice').value=300;element('saleChargesMode').value='actual';element('saleActualCharges').value=10;element('saleDate').value='';
  await element('saleForm').onsubmit({preventDefault(){}});
  assert.equal(run('zerodha.status'),'Closed');assert(!element('ongoingRows').innerHTML.includes('TMPV'));assert(element('journal').innerHTML.includes('TMPV'));assert.equal(run('tradePnl(zerodha)'),7150);
+ run("state.plans.push({id:'ZERODHA-RESTORE',symbol:'ZERODHARESTORE',entry:100,sl:90,target:120,qty:10,fill:101,status:'Watching',holdingBroker:'Zerodha'});migrateSavedHoldings();render();");
+ assert.equal(run("state.plans.find(p=>p.id==='ZERODHA-RESTORE').status"),'Imported holding','A saved Zerodha holding must recover if a stale status was written during refresh');
+ assert(element('ongoingRows').innerHTML.includes('ZERODHARESTORE'),'Zerodha holding remains in Holdings after migration');assert(element('unsettledPortfolioRows').innerHTML.includes('ZERODHARESTORE'),'Zerodha holding remains in the portfolio unsettled section');
+ run("TradeDeskData.setManualHoldingPrice('ZERODHA-RESTORE',110);render();");
+ assert.equal(run("state.plans.find(p=>p.id==='ZERODHA-RESTORE').pnl"),90,'Manual Zerodha CMP calculates open P/L from actual buy fill and quantity');
+ assert(element('ongoingRows').innerHTML.includes('Manual price'));assert(element('unsettledPortfolioRows').innerHTML.includes(run('money(90)')),'Manual Zerodha CMP and P/L appear in My Portfolio');
+ context.emptyQuoteBatch={quotes:{},unresolved:[]};run('TradeDeskData.applyQuotes(emptyQuoteBatch);');assert.equal(run("state.plans.find(p=>p.id==='ZERODHA-RESTORE').pnl"),90,'A missing quote refresh preserves the manually saved CMP');
+ context.liveZerodhaQuote={quotes:{ZERODHARESTORE:{price:112,fetchedAt:new Date(Date.now()+1000).toISOString()}},unresolved:[]};run('TradeDeskData.applyQuotes(liveZerodhaQuote);');assert.equal(run("state.plans.find(p=>p.id==='ZERODHA-RESTORE').pnl"),110,'A fresh Dhan quote supersedes the manual fallback price');
  context.unlinkedSnapshot={clientId:'123',checkedAt:new Date().toISOString(),holdings:[{symbol:'UNLINKED',securityId:'777',quantity:6,averagePrice:100}],positions:[]};
  run('TradeDeskData.applyPortfolioSnapshot(unlinkedSnapshot);');assert(element('ongoingRows').innerHTML.includes('UNLINKED'));assert(!element('plans').innerHTML.includes('UNLINKED'));assert.equal(run("state.plans.some(p=>p.symbol==='UNLINKED')"),false,'Account holdings must be shown even without inventing a strategy plan');
- context.unlinkedQuote={quotes:{UNLINKED:{price:123,fetchedAt:new Date().toISOString()}},unresolved:[]};run('TradeDeskData.applyQuotes(unlinkedQuote);');assert(run("TradeDeskData.symbols().includes('UNLINKED')"));assert.equal(run("ongoingTrades().find(p=>p.symbol==='UNLINKED').cmp"),123);assert.equal(run("ongoingTrades().find(p=>p.symbol==='UNLINKED').pnl"),138);
+ context.unlinkedQuote={quotes:{UNLINKED:{price:123,fetchedAt:new Date().toISOString()}},unresolved:[]};run('TradeDeskData.applyQuotes(unlinkedQuote);');assert(run("TradeDeskData.symbols().includes('UNLINKED')"));assert.equal(run("ongoingTrades().find(p=>p.symbol==='UNLINKED').cmp"),123);assert.equal(run("ongoingTrades().find(p=>p.symbol==='UNLINKED').pnl"),138);run('sessionQuotes.clear();');assert.equal(run("ongoingTrades().find(p=>p.symbol==='UNLINKED').pnl"),138,'Unlinked holdings retain a clearly labeled last-known-price basis for open P/L across page reloads');
  context.pageindLevelsUpdate=JSON.parse(fs.readFileSync(__dirname+'/tracker-data.json','utf8')).planUpdates.filter(u=>u.kind==='holdingLevels');
  context.pageindAccount={clientId:'123',checkedAt:new Date().toISOString(),holdings:[{symbol:'PAGEIND',securityId:'14413',quantity:4,averagePrice:32125}],positions:[]};
  run("state.plans=state.plans.filter(p=>p.symbol!=='PAGEIND');TradeDeskData.applyPortfolioSnapshot(pageindAccount);applyProvidedPlanUpdates(pageindLevelsUpdate);render();");

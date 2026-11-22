@@ -10,8 +10,8 @@ class LauncherTests(unittest.TestCase):
             self.assertEqual(launch.select_backend(), 8081)
 
     def test_old_server_never_silently_changes_storage_origin(self):
-        with patch.object(launch, 'backend_info', side_effect=lambda port: {'backendVersion': 9} if port == 8080 else None), patch.object(launch.subprocess, 'Popen') as start:
-            with self.assertRaisesRegex(RuntimeError, 'older.*8080'):
+        with patch.object(launch, 'backend_info', side_effect=lambda port: {'backendVersion': 9} if port == 8081 else None), patch.object(launch.subprocess, 'Popen') as start:
+            with self.assertRaisesRegex(RuntimeError, 'older.*8081'):
                 launch.select_backend()
             start.assert_not_called()
 

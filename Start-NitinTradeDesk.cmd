@@ -1,4 +1,4 @@
 @echo off
 cd /d "%~dp0"
-python launch.py
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0Restart-NitinTradeDesk.ps1"
 if errorlevel 1 pause

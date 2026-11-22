@@ -51,7 +51,7 @@ class MarketTests(unittest.TestCase):
             self.assertNotIn('fake-token', str(quotes))
             self.assertEqual(session.quotes(['UNKNOWN', 'JIOFIN', 'TCS']), quotes)
             api.assert_called_once()
-            self.assertEqual(api.call_args.args[2], '/marketfeed/ltp')
+            self.assertEqual(api.call_args.args[2], '/marketfeed/ohlc')
             self.assertEqual(api.call_args.args[3], {'NSE_EQ': [11536, 18143]})
 
     def test_empty_quote_set_reports_dhan_response_diagnostics(self):
