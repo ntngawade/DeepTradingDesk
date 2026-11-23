@@ -5,6 +5,9 @@ import json
 import hmac
 import os
 import base64
+import hashlib
+import secrets
+from http.cookies import SimpleCookie
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import xml.etree.ElementTree as ET
@@ -40,6 +43,119 @@ class ConnectionError(ValueError):
 class NoRedirect(HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
+
+
+class LocalLogin:
+    """Single-user local login with persistent, revocable remember-device sessions."""
+    COOKIE = 'DTD_SESSION'
+    REMEMBER_SECONDS = 365 * 24 * 60 * 60
+    SESSION_SECONDS = 24 * 60 * 60
+    PBKDF2_ITERATIONS = 310_000
+
+    def __init__(self, path):
+        self.path = Path(path)
+        self.lock = threading.RLock()
+        self.data = {'salt': '', 'passwordHash': '', 'sessions': {}}
+        try:
+            loaded = json.loads(self.path.read_text(encoding='utf-8'))
+            if isinstance(loaded, dict) and isinstance(loaded.get('sessions', {}), dict):
+                self.data.update(loaded)
+        except (OSError, ValueError, TypeError):
+            pass
+
+    def configured(self):
+        return bool(self.data.get('salt') and self.data.get('passwordHash'))
+
+    def status(self, token=None):
+        with self.lock:
+            return {'configured': self.configured(), 'authenticated': self.valid(token),
+                    'rememberDays': 365}
+
+    def _derive(self, password, salt):
+        return hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt, self.PBKDF2_ITERATIONS)
+
+    def _write(self):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self.path.with_suffix('.tmp')
+        try:
+            temporary.write_text(json.dumps(self.data, separators=(',', ':')), encoding='utf-8')
+            os.replace(temporary, self.path)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+    def setup(self, password):
+        if not isinstance(password, str) or len(password) < 10 or len(password) > 256:
+            raise ValueError('Choose a password with at least 10 characters.')
+        with self.lock:
+            if self.configured():
+                raise ValueError('Login is already set up. Sign in with your saved password.')
+            salt = secrets.token_bytes(16)
+            self.data.update({'salt': base64.b64encode(salt).decode('ascii'),
+                              'passwordHash': base64.b64encode(self._derive(password, salt)).decode('ascii'),
+                              'sessions': {}})
+            self._write()
+
+    def login(self, password, remember=True):
+        if not isinstance(password, str) or len(password) > 256:
+            raise ValueError('Password is incorrect.')
+        with self.lock:
+            if not self.configured():
+                raise ValueError('Set up your local login first.')
+            try:
+                salt = base64.b64decode(self.data['salt'], validate=True)
+                expected = base64.b64decode(self.data['passwordHash'], validate=True)
+            except (ValueError, KeyError, TypeError):
+                raise ValueError('Saved login data is invalid. Contact support before removing it.') from None
+            if not hmac.compare_digest(self._derive(password, salt), expected):
+                raise ValueError('Password is incorrect.')
+            token = secrets.token_urlsafe(48)
+            now = int(time.time())
+            sessions = {key: expiry for key, expiry in self.data.get('sessions', {}).items()
+                        if isinstance(expiry, int) and expiry > now}
+            lifetime = self.REMEMBER_SECONDS if remember else self.SESSION_SECONDS
+            sessions[hashlib.sha256(token.encode()).hexdigest()] = now + lifetime
+            while len(sessions) > 12:
+                sessions.pop(next(iter(sessions)))
+            self.data['sessions'] = sessions
+            self._write()
+            return token, lifetime if remember else None
+
+    def valid(self, token):
+        if not isinstance(token, str) or len(token) < 32:
+            return False
+        now = int(time.time())
+        digest = hashlib.sha256(token.encode()).hexdigest()
+        with self.lock:
+            sessions = self.data.get('sessions', {})
+            expiry = sessions.get(digest)
+            if isinstance(expiry, int) and expiry > now:
+                return True
+            if digest in sessions:
+                sessions.pop(digest, None)
+                self.data['sessions'] = sessions
+                self._write()
+            return False
+
+    def logout(self, token):
+        if not isinstance(token, str):
+            return
+        digest = hashlib.sha256(token.encode()).hexdigest()
+        with self.lock:
+            self.data.setdefault('sessions', {}).pop(digest, None)
+            self._write()
+
+
+LOGIN = LocalLogin(ROOT / 'runtime' / 'login.json')
+
+LOGIN_HTML = '''<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sign in | Deep Trading Desk</title><style>
+*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;background:radial-gradient(ellipse at 50% 0,#263b53,#101722 58%);font:15px Inter,"Segoe UI",sans-serif;color:#e8eef7}.panel{width:min(100%,440px);padding:34px;background:#151e2b;border:1px solid #31445d;border-radius:18px;box-shadow:0 24px 80px #0006}.brand{display:flex;align-items:center;gap:13px;margin-bottom:28px}.mark{display:grid;place-items:center;width:46px;height:46px;border-radius:13px;background:#25c99a;color:#09231e;font-weight:900;font-size:21px}.brand strong{font-size:18px}.brand small{display:block;color:#8fa3bb;margin-top:4px;letter-spacing:.08em;font-size:10px}.eyebrow{color:#4cddb2;text-transform:uppercase;font-size:11px;font-weight:800;letter-spacing:.12em}h1{font-size:24px;margin:8px 0}p{color:#a9b8ca;line-height:1.55;font-size:13px;margin:0 0 24px}label{display:block;font-size:12px;color:#bdc9d8;font-weight:650;margin:16px 0 7px}input[type=password]{width:100%;border:1px solid #3a4c64;background:#0f1723;color:#f5f7fa;padding:13px;border-radius:9px;font:inherit;outline:none}input:focus{border-color:#32d2a1;box-shadow:0 0 0 3px #32d2a122}.remember{display:flex;align-items:center;gap:9px;color:#adbbcb;font-size:12px;margin:17px 0}.remember input{accent-color:#20c795;width:16px;height:16px}button{width:100%;padding:13px;border:0;border-radius:9px;background:#23c99a;color:#08251d;font-weight:800;font-size:14px;cursor:pointer}button:disabled{opacity:.55;cursor:wait}.error{min-height:20px;color:#ff8897;font-size:12px;margin:12px 0 0}.foot{border-top:1px solid #2b394d;margin-top:22px;padding-top:15px;color:#8396ad;font-size:11px;line-height:1.5}
+</style></head><body><main class="panel"><div class="brand"><div class="mark">D</div><div><strong>Deep Trading Desk</strong><small>PERSONAL TRADING WORKSPACE</small></div></div><div class="eyebrow" id="mode">SECURE LOCAL LOGIN</div><h1 id="title">Sign in</h1><p id="intro">Use your saved password to open your trading workspace.</p><form id="form"><label for="password">Password</label><input id="password" type="password" autocomplete="current-password" minlength="10" maxlength="256" required><div id="confirmWrap" hidden><label for="confirm">Confirm password</label><input id="confirm" type="password" autocomplete="new-password" minlength="10" maxlength="256"></div><label class="remember"><input id="remember" type="checkbox" checked> Keep me signed in on this device for 1 year</label><button id="submit" type="submit">Sign in</button><div id="error" class="error" role="alert"></div></form><div class="foot">This login is stored on this computer. Your password is saved as a salted hash; the remember option stores a revocable sign-in session in this browser.</div></main><script>
+const form=document.getElementById('form'),error=document.getElementById('error'),password=document.getElementById('password'),confirm=document.getElementById('confirm'),remember=document.getElementById('remember'),button=document.getElementById('submit');let setup=false;
+fetch('/api/auth/status',{cache:'no-store'}).then(r=>r.json()).then(s=>{setup=!s.configured;if(setup){document.getElementById('mode').textContent='FIRST-TIME SETUP';document.getElementById('title').textContent='Create your login';document.getElementById('intro').textContent='Create one password to protect this local trading workspace. You will stay signed in on this device.';document.getElementById('confirmWrap').hidden=false;document.getElementById('password').autocomplete='new-password';button.textContent='Create login & open desk';}}).catch(()=>error.textContent='Cannot connect to the local app server. Start Deep Trading Desk and try again.');
+form.addEventListener('submit',async e=>{e.preventDefault();error.textContent='';if(setup&&password.value!==confirm.value){error.textContent='The passwords do not match.';return;}button.disabled=true;try{const response=await fetch(setup?'/api/auth/setup':'/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:password.value,remember:remember.checked})});const result=await response.json();if(!response.ok)throw new Error(result.error||'Unable to sign in.');location.replace('/');}catch(ex){error.textContent=ex.message||'Unable to sign in.';button.disabled=false;}});
+</script></body></html>'''
 
 
 def dhan_profile(token):
@@ -495,6 +611,50 @@ class Handler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(payload)
 
+    def login_token(self):
+        try:
+            cookies = SimpleCookie(self.headers.get('Cookie', ''))
+            return cookies.get(LOGIN.COOKIE).value if cookies.get(LOGIN.COOKIE) else None
+        except Exception:
+            return None
+
+    def login_page(self):
+        payload = LOGIN_HTML.encode('utf-8')
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/html; charset=utf-8')
+        self.send_header('Cache-Control', 'no-store')
+        self.send_header('Content-Length', str(len(payload)))
+        self.end_headers()
+        if self.command != 'HEAD':
+            self.wfile.write(payload)
+
+    def set_login_cookie(self, token, max_age):
+        value = f'{LOGIN.COOKIE}={token}; Path=/; HttpOnly; SameSite=Strict'
+        if max_age is not None:
+            value += f'; Max-Age={int(max_age)}'
+        self.send_header('Set-Cookie', value)
+
+    def auth_json_body(self):
+        if self.headers.get('Content-Type', '').split(';')[0] != 'application/json':
+            raise ValueError('JSON body required.')
+        size = int(self.headers.get('Content-Length', 0))
+        if not 0 < size <= 2_000:
+            raise ValueError('Invalid login request.')
+        body = json.loads(self.rfile.read(size))
+        if not isinstance(body, dict):
+            raise ValueError('Invalid login request.')
+        return body
+
+    def auth_cookie_response(self, token, max_age, status=200):
+        payload = json.dumps({'ok': True, 'remembered': max_age is not None}).encode()
+        self.send_response(status)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Cache-Control', 'no-store')
+        self.set_login_cookie(token, max_age)
+        self.send_header('Content-Length', str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
     def application_page(self):
         """Include a fresh account snapshot so initial holdings do not depend on a second script request."""
         try:
@@ -543,10 +703,30 @@ class Handler(SimpleHTTPRequestHandler):
         if not self.local_request():
             self.send_error(403)
             return
-        if urlsplit(self.path).path in ('/', '/index.html', '/holdings'):
-            self.application_page()
-        elif self.path == '/api/app/status':
+        path = urlsplit(self.path).path
+        if path == '/api/auth/status':
+            self.json_response(LOGIN.status(self.login_token()))
+        elif path == '/api/app/status':
+            # The launcher uses this harmless version check before opening the app.
             self.json_response({'application': 'DeepTradingDesk', 'backendVersion': APP_VERSION, 'workspace': str(ROOT)})
+        elif path == '/login':
+            if LOGIN.valid(self.login_token()):
+                self.send_response(302)
+                self.send_header('Location', '/')
+                self.send_header('Cache-Control', 'no-store')
+                self.end_headers()
+            else:
+                self.login_page()
+        elif not LOGIN.valid(self.login_token()):
+            if path.startswith('/api/'):
+                self.json_response({'error': 'Sign in to Deep Trading Desk first.'}, 401)
+            else:
+                self.send_response(302)
+                self.send_header('Location', '/login')
+                self.send_header('Cache-Control', 'no-store')
+                self.end_headers()
+        elif path in ('/', '/index.html', '/holdings'):
+            self.application_page()
         elif self.path == '/api/dhan/status':
             self.json_response(DHAN.status())
         elif self.path == '/api/telegram/status':
@@ -580,16 +760,52 @@ class Handler(SimpleHTTPRequestHandler):
                                            '/dhan-connection.js', '/market-data.js', '/live-controls.js', '/portfolio-view.js', '/chart-lab.js', '/tracker-data.json'}
 
     def do_HEAD(self):
-        if self.local_request() and urlsplit(self.path).path in ('/', '/index.html', '/holdings'):
+        path = urlsplit(self.path).path
+        if not self.local_request():
+            self.send_error(403)
+        elif path == '/login':
+            self.login_page()
+        elif path == '/api/app/status':
+            self.json_response({'application': 'DeepTradingDesk', 'backendVersion': APP_VERSION, 'workspace': str(ROOT)})
+        elif LOGIN.valid(self.login_token()) and path in ('/', '/index.html', '/holdings'):
             self.application_page()
-        elif self.local_request() and self.allowed_asset():
+        elif LOGIN.valid(self.login_token()) and self.allowed_asset():
             super().do_HEAD()
         else:
-            self.send_error(404)
+            self.send_response(302)
+            self.send_header('Location', '/login')
+            self.send_header('Content-Length', '0')
+            self.end_headers()
 
     def do_POST(self):
         if not self.local_request():
             self.json_response({'error': 'Only same-origin local requests are allowed.'}, 403)
+            return
+        if self.path in ('/api/auth/setup', '/api/auth/login'):
+            try:
+                body = self.auth_json_body()
+                if self.path.endswith('/setup'):
+                    LOGIN.setup(body.get('password'))
+                    token, max_age = LOGIN.login(body.get('password'), body.get('remember') is True)
+                else:
+                    token, max_age = LOGIN.login(body.get('password'), body.get('remember') is True)
+                self.auth_cookie_response(token, max_age)
+            except (ValueError, TypeError) as error:
+                self.json_response({'error': str(error)}, 400)
+            return
+        if self.path == '/api/auth/logout':
+            LOGIN.logout(self.login_token())
+            payload = b'{"ok":true}'
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Cache-Control', 'no-store')
+            self.send_header('Set-Cookie', f'{LOGIN.COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0')
+            self.send_header('Content-Length', str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+            return
+        if not LOGIN.valid(self.login_token()):
+            self.json_response({'error': 'Sign in to Deep Trading Desk first.'}, 401)
             return
         if self.path == '/api/chart-ai/analyze':
             try:

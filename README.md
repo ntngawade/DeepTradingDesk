@@ -4,6 +4,8 @@ Local delivery planner, Excel import, Dhan CMP and paper journal. Paper mode is 
 
 Start by double-clicking Start-NitinTradeDesk.cmd, or run `python launch.py`. The app uses one address only: http://127.0.0.1:8081. The launcher rejects obsolete backend versions rather than switching ports or storage origins. Use this application's server, not Live Server or python -m http.server. Python 3.10+ is sufficient for the base app. Keep this loopback-only server local.
 
+On first launch, create a local password. The password is stored as a salted PBKDF2 hash in `runtime/login.json`; the default “Keep me signed in” option saves a revocable browser session for one year. The login protects the dashboard and backend APIs without changing browser-stored plans. To sign out, use **Log out** in the app header.
+
 ## Field rules
 
 | Column | Source / calculation |
